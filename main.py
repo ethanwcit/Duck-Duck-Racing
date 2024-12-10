@@ -1,15 +1,18 @@
 import pygame
 import os
 import math
-import sys
-import neat
+from ddpg_agent import DDPGAgent  # Import your agent here
 
+# Constants
 SCREEN_WIDTH = 1244
 SCREEN_HEIGHT = 1016
+FPS = 60
+
+# Initialize pygame
+pygame.init()
 SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-
+pygame.display.set_caption("Duck Duck Racing")
 TRACK = pygame.image.load(os.path.join("Assets", "track.png"))
-
 
 class Car(pygame.sprite.Sprite):
     def __init__(self):
@@ -43,12 +46,10 @@ class Car(pygame.sprite.Sprite):
         collision_point_left = [int(self.rect.center[0] + math.cos(math.radians(self.angle - 18)) * length),
                                 int(self.rect.center[1] - math.sin(math.radians(self.angle - 18)) * length)]
 
-        # Die on Collision
         if SCREEN.get_at(collision_point_right) == pygame.Color(2, 105, 31, 255) \
                 or SCREEN.get_at(collision_point_left) == pygame.Color(2, 105, 31, 255):
             self.alive = False
 
-        # Draw Collision Points
         pygame.draw.circle(SCREEN, (0, 255, 255, 0), collision_point_right, 4)
         pygame.draw.circle(SCREEN, (0, 255, 255, 0), collision_point_left, 4)
 
@@ -73,7 +74,6 @@ class Car(pygame.sprite.Sprite):
             x = int(self.rect.center[0] + math.cos(math.radians(self.angle + radar_angle)) * length)
             y = int(self.rect.center[1] - math.sin(math.radians(self.angle + radar_angle)) * length)
 
-        # Draw Radar
         pygame.draw.line(SCREEN, (255, 255, 255, 255), self.rect.center, (x, y), 1)
         pygame.draw.circle(SCREEN, (0, 255, 0, 0), (x, y), 3)
 
@@ -88,81 +88,66 @@ class Car(pygame.sprite.Sprite):
             input[i] = int(radar[1])
         return input
 
+def main():
+    clock = pygame.time.Clock()
 
-def remove(index):
-    cars.pop(index)
-    ge.pop(index)
-    nets.pop(index)
+    # Initialize DDPG agent
+    state_dim = 5  # Radar distances
+    action_dim = 1  # Direction (-1, 0, 1)
+    max_action = 1
+    agent = DDPGAgent(state_dim, action_dim, max_action)
 
-
-def eval_genomes(genomes, config):
-    global cars, ge, nets
-
-    cars = []
-    ge = []
-    nets = []
-
-    for genome_id, genome in genomes:
-        cars.append(pygame.sprite.GroupSingle(Car()))
-        ge.append(genome)
-        net = neat.nn.FeedForwardNetwork.create(genome, config)
-        nets.append(net)
-        genome.fitness = 0
+    car = Car()
+    car_group = pygame.sprite.GroupSingle(car)
 
     run = True
+    paused = False
+
     while run:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+                run = False
+
+            if paused:
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        paused = False
+                        main()
 
         SCREEN.blit(TRACK, (0, 0))
 
-        if len(cars) == 0:
-            break
+        if not paused:
+            state = car.data()
 
-        for i, car in enumerate(cars):
-            ge[i].fitness += 1
-            if not car.sprite.alive:
-                remove(i)
+            action = agent.select_action(state)
 
-        for i, car in enumerate(cars):
-            output = nets[i].activate(car.sprite.data())
-            if output[0] > 0.7:
-                car.sprite.direction = 1
-            if output[1] > 0.7:
-                car.sprite.direction = -1
-            if output[0] <= 0.7 and output[1] <= 0.7:
-                car.sprite.direction = 0
+            # Map action to car direction
+            if action > 0.5:
+                car.direction = 1  # Turn right
+            elif action < -0.5:
+                car.direction = -1  # Turn left
+            else:
+                car.direction = 0  # Go straight
 
-        # Update
-        for car in cars:
-            car.draw(SCREEN)
-            car.update()
+            car_group.update()
+
+            if not car.alive:
+                paused = True
+
+        car_group.draw(SCREEN)
+
+        if paused:
+            font = pygame.font.SysFont("Arial", 48)
+            text = font.render("Game Paused - Press SPACE to Resume", True, (255, 255, 255))
+            text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+            SCREEN.blit(text, text_rect)
+
+        # Update the display
         pygame.display.update()
+        clock.tick(FPS)
+
+    pygame.quit()
 
 
-# Setup NEAT Neural Network
-def run(config_path):
-    global pop
-    config = neat.config.Config(
-        neat.DefaultGenome,
-        neat.DefaultReproduction,
-        neat.DefaultSpeciesSet,
-        neat.DefaultStagnation,
-        config_path
-    )
-
-    pop = neat.Population(config)
-
-    pop.add_reporter(neat.StdOutReporter(True))
-    stats = neat.StatisticsReporter()
-    pop.add_reporter(stats)
-
-    pop.run(eval_genomes, 50)
-
-
-if __name__ == '__main__':
-    local_dir = os.path.dirname(__file__)
-    config_path = os.path.join(local_dir, 'config.txt')
-    run(config_path)
+if __name__ == "__main__":
+    main()
