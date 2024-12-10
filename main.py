@@ -4,6 +4,7 @@ import math
 import sys
 import neat
 
+
 SCREEN_WIDTH = 1244
 SCREEN_HEIGHT = 1016
 SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -86,6 +87,7 @@ class Car(pygame.sprite.Sprite):
         input = [0, 0, 0, 0, 0]
         for i, radar in enumerate(self.radars):
             input[i] = int(radar[1])
+        print(input)
         return input
 
 
