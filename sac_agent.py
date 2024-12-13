@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 from collections import deque
+import os
 
 # Actor Network
 class Actor(nn.Module):
@@ -129,3 +130,38 @@ class SACAgent:
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
         for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+
+    def save_model(self, directory):
+        """
+        Save the SAC model (actor, critic1, critic2) to the specified directory.
+        """
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        # Save actor and critics
+        torch.save(self.actor.state_dict(), os.path.join(directory, "actor.pth"))
+        torch.save(self.critic1.state_dict(), os.path.join(directory, "critic1.pth"))
+        torch.save(self.critic2.state_dict(), os.path.join(directory, "critic2.pth"))
+
+        # Save actor and critic optimizers
+        torch.save(self.actor_optimizer.state_dict(), os.path.join(directory, "actor_optimizer.pth"))
+        torch.save(self.critic1_optimizer.state_dict(), os.path.join(directory, "critic1_optimizer.pth"))
+        torch.save(self.critic2_optimizer.state_dict(), os.path.join(directory, "critic2_optimizer.pth"))
+
+        print(f"Model saved to {directory}")
+
+    def load_model(self, directory):
+        """
+        Load the SAC model (actor, critic1, critic2) from the specified directory.
+        """
+        # Load actor and critics
+        self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth")))
+        self.critic1.load_state_dict(torch.load(os.path.join(directory, "critic1.pth")))
+        self.critic2.load_state_dict(torch.load(os.path.join(directory, "critic2.pth")))
+
+        # Load actor and critic optimizers
+        self.actor_optimizer.load_state_dict(torch.load(os.path.join(directory, "actor_optimizer.pth")))
+        self.critic1_optimizer.load_state_dict(torch.load(os.path.join(directory, "critic1_optimizer.pth")))
+        self.critic2_optimizer.load_state_dict(torch.load(os.path.join(directory, "critic2_optimizer.pth")))
+
+        print(f"Model loaded from {directory}")
