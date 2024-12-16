@@ -9,15 +9,16 @@ env = gym.make("Pendulum-v1")
 
 # Stable-Baselines3 SAC
 model = SAC("MlpPolicy", env, verbose=1)
-model.learn(total_timesteps=50000)
+model.learn(total_timesteps=20000)
 
 # Test the agent
 sb_rewards = []
 episodes = 100
-for _ in range(episodes):
+for episode in range(episodes):
     state, _ = env.reset()
     episode_reward = 0
-    for _ in range(200):
+
+    for step in range(200):
         action, _ = model.predict(state)
         state, reward, done, _, _ = env.step(action)
         episode_reward += reward

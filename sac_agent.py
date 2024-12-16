@@ -132,9 +132,7 @@ class SACAgent:
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
 
     def save_model(self, directory):
-        """
-        Save the SAC model (actor, critic1, critic2) to the specified directory.
-        """
+
         if not os.path.exists(directory):
             os.makedirs(directory)
 
@@ -151,9 +149,7 @@ class SACAgent:
         print(f"Model saved to {directory}")
 
     def load_model(self, directory):
-        """
-        Load the SAC model (actor, critic1, critic2) from the specified directory.
-        """
+
         # Load actor and critics
         self.actor.load_state_dict(torch.load(os.path.join(directory, "actor.pth")))
         self.critic1.load_state_dict(torch.load(os.path.join(directory, "critic1.pth")))
@@ -165,3 +161,18 @@ class SACAgent:
         self.critic2_optimizer.load_state_dict(torch.load(os.path.join(directory, "critic2_optimizer.pth")))
 
         print(f"Model loaded from {directory}")
+
+    def predict(self,state,deterministic = True):
+
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).cuda()
+
+        if deterministic:
+
+            with torch.no_grad():
+                action = self.actor(state_tensor)[0] 
+        else:
+
+            with torch.no_grad():
+                action, _ = self.actor.sample(state_tensor) 
+
+        return action.cpu().numpy().flatten()
