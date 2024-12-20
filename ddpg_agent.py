@@ -79,7 +79,7 @@ class DDPGAgent:
             return
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
-        states = torch.FloatTensor(states).cuda()
+        print(states, actions, rewards, next_states, dones)
         actions = torch.FloatTensor(actions).cuda()
         rewards = torch.FloatTensor(rewards).unsqueeze(1).cuda()
         next_states = torch.FloatTensor(next_states).cuda()

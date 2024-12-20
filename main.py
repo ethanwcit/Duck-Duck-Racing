@@ -1,12 +1,14 @@
 import pygame
 import os
+import numpy as np
 import math
-from ddpg_agent import DDPGAgent  # Import your agent here
+from ddpg_agent import DDPGAgent
+from td3_agent import TD3Agent
 
 # Constants
 SCREEN_WIDTH = 1244
 SCREEN_HEIGHT = 1016
-FPS = 60
+FPS = 512
 
 # Initialize pygame
 pygame.init()
@@ -24,8 +26,10 @@ class Car(pygame.sprite.Sprite):
         self.angle = 0
         self.rotation_vel = 5
         self.direction = 0
+        self.target_direction = 0  # Direction based on action
         self.alive = True
         self.radars = []
+        self.filter_alpha = 0.7  # Low-pass filter alpha
 
     def update(self):
         self.radars.clear()
@@ -54,6 +58,12 @@ class Car(pygame.sprite.Sprite):
         pygame.draw.circle(SCREEN, (0, 255, 255, 0), collision_point_left, 4)
 
     def rotate(self):
+        self.direction = (1 - self.filter_alpha) * self.direction + self.filter_alpha * self.target_direction
+                # Check if the direction is sufficiently close to the target direction and directly set it to target
+        # print(self.direction)
+        if abs(self.direction - self.target_direction) < 0.05:  # Threshold to snap to target
+            self.direction = self.target_direction
+
         if self.direction == 1:
             self.angle -= self.rotation_vel
             self.vel_vector.rotate_ip(self.rotation_vel)
@@ -91,63 +101,102 @@ class Car(pygame.sprite.Sprite):
 def main():
     clock = pygame.time.Clock()
 
-    # Initialize DDPG agent
+    # Initialize TD3 agent
     state_dim = 5  # Radar distances
     action_dim = 1  # Direction (-1, 0, 1)
     max_action = 1
-    agent = DDPGAgent(state_dim, action_dim, max_action)
+    agent = TD3Agent(state_dim, action_dim, max_action)
 
+    # Create the car and car group
     car = Car()
     car_group = pygame.sprite.GroupSingle(car)
 
-    run = True
-    paused = False
+    # Training parameters
+    total_episodes = 1000  # Total number of episodes to run
+    max_timesteps = 1000  # Max timesteps per episode
+    noise_std = 0.1  # Standard deviation for exploration noise
 
-    while run:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                run = False
+    for episode in range(total_episodes):
+        car = Car()  # Reset the car at the start of each episode
+        car_group = pygame.sprite.GroupSingle(car)
+        total_reward = 0
+        episode_timesteps = 0
+        paused = False
+        exploration_noise = 0.1
 
-            if paused:
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_SPACE:
-                        paused = False
-                        main()
+        while not paused:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    paused = True
 
-        SCREEN.blit(TRACK, (0, 0))
+            # Blit background track image
+            SCREEN.blit(TRACK, (0, 0))
 
-        if not paused:
+            # Get current state from the car
             state = car.data()
+            state = np.array(state, dtype=np.float32) / 200  # Normalize radar distances
+            episode_timesteps += 1
+# For early episodes, use higher exploration noise
+            if episode < 300:  # During the first few episodes
+                exploration_noise = 0.5  # Higher noise for more exploration
+            else:
+                exploration_noise = 0.1  # Lower noise as the agent learns more
 
-            action = agent.select_action(state)
+            # Select action using the TD3 agent
+            action = agent.select_action(state, exploration_noise)
 
             # Map action to car direction
             if action > 0.5:
-                car.direction = 1  # Turn right
+                car.target_direction = 1  # Turn right
             elif action < -0.5:
-                car.direction = -1  # Turn left
+                car.target_direction = -1  # Turn left
             else:
-                car.direction = 0  # Go straight
+                car.target_direction = 0  # Go straight
 
+            # Update car and check for collisions
             car_group.update()
 
-            if not car.alive:
-                paused = True
+            # Compute reward
+            if car.alive:
+                reward = 1.0  # Reward for staying alive
+                total_reward += reward
+                next_state = car.data()
+                next_state = np.array(next_state, dtype=np.float32) / 200  # Normalize radar distances
+                done = episode_timesteps >= max_timesteps
+            else:
+                reward = -10.0  # Penalty for collision
+                done = True
+                next_state = np.zeros_like(state, dtype=np.float32)  # Placeholder for next_state
 
-        car_group.draw(SCREEN)
+            # Store transition in replay buffer
+            agent.replay_buffer.add(state, action, reward, next_state, done)
 
+            # Train the TD3 agent
+            agent.train(batch_size=64)
+
+            # Check if episode is done
+            if done:
+                print(f"Episode {episode+1}/{total_episodes} ended: Total reward = {total_reward}")
+                break  # Exit the while loop to start a new episode
+
+            # Draw the car and update the screen
+            car_group.draw(SCREEN)
+
+            # Update the display
+            pygame.display.update()
+
+            # Control the frame rate
+            clock.tick(FPS)
+
+        # Pause screen (optional)
         if paused:
             font = pygame.font.SysFont("Arial", 48)
             text = font.render("Game Paused - Press SPACE to Resume", True, (255, 255, 255))
             text_rect = text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
             SCREEN.blit(text, text_rect)
-
-        # Update the display
-        pygame.display.update()
-        clock.tick(FPS)
+            pygame.display.update()  # Update the display for paused screen
 
     pygame.quit()
-
 
 if __name__ == "__main__":
     main()
