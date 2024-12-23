@@ -57,7 +57,9 @@ for episode in range(episodes):
     # Save rewards and episode lengths for each episode
     episode_rewards.append(np.array([episode, episode_reward]))
 
-    print(f"Episode: {episode}, Reward: {episode_reward}")
+    
+
+    print(f"Episode: {episode}, Reward: {episode_reward}, Actor loss: {agent.actor_loss}, Critic loss: {agent.critic_loss}")
 
     # Save model after every episode or periodically
     # if episode % 10 == 0:

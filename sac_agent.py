@@ -76,6 +76,9 @@ class SACAgent:
         self.max_action = max_action
         self.alpha = alpha
 
+        self.critic_loss = None
+        self.actor_loss = None
+
     def select_action(self, state):
         state = torch.FloatTensor(state).unsqueeze(0).cuda()
         return self.actor(state).cpu().data.numpy().flatten()
@@ -105,6 +108,8 @@ class SACAgent:
         current_Q2 = self.critic2(states, actions)
         critic1_loss = nn.MSELoss()(current_Q1, target_Q)
         critic2_loss = nn.MSELoss()(current_Q2, target_Q)
+
+        self.critic_loss = (critic1_loss + critic2_loss).item() / 2
         
         self.critic1_optimizer.zero_grad()
         critic1_loss.backward()
@@ -119,9 +124,14 @@ class SACAgent:
         actor_loss = (self.alpha * log_probs - 
               torch.min(self.critic1(states, self.actor(states)),
                         self.critic2(states, self.actor(states)))).mean()
+        
+        self.actor_loss = actor_loss.item()
+
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
+
+
 
         # Update Target Networks
         for param, target_param in zip(self.critic1.parameters(), self.critic1_target.parameters()):
