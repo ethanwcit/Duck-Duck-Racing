@@ -8,7 +8,7 @@ SCREEN_WIDTH = 1244
 SCREEN_HEIGHT = 1016
 SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
-TRACK = pygame.image.load(os.path.join("Assets", "track.png"))
+TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
 
 
 class Car(pygame.sprite.Sprite):
@@ -44,8 +44,8 @@ class Car(pygame.sprite.Sprite):
                                 int(self.rect.center[1] - math.sin(math.radians(self.angle - 18)) * length)]
 
         # Die on Collision
-        if SCREEN.get_at(collision_point_right) == pygame.Color(2, 105, 31, 255) \
-                or SCREEN.get_at(collision_point_left) == pygame.Color(2, 105, 31, 255):
+        if SCREEN.get_at(collision_point_right) == pygame.Color(207,230,186,255) \
+                or SCREEN.get_at(collision_point_left) == pygame.Color(207,230,186,255):
             self.alive = False
 
         # Draw Collision Points
@@ -68,7 +68,7 @@ class Car(pygame.sprite.Sprite):
         x = int(self.rect.center[0])
         y = int(self.rect.center[1])
 
-        while not SCREEN.get_at((x, y)) == pygame.Color(2, 105, 31, 255) and length < 200:
+        while not SCREEN.get_at((x, y)) == pygame.Color(207,230,186,255) and length < 200:
             length += 1
             x = int(self.rect.center[0] + math.cos(math.radians(self.angle + radar_angle)) * length)
             y = int(self.rect.center[1] - math.sin(math.radians(self.angle + radar_angle)) * length)
