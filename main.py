@@ -10,11 +10,13 @@ SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
 TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
 
+# Change based on agent used
+DUCK = "ddpg.png"
 
 class Car(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
-        self.original_image = pygame.image.load(os.path.join("Assets", "car.png"))
+        self.original_image = pygame.image.load(os.path.join("Assets", DUCK))
         self.image = self.original_image
         self.rect = self.image.get_rect(center=(490, 820))
         self.vel_vector = pygame.math.Vector2(0.8, 0)
