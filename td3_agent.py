@@ -36,7 +36,7 @@ class Critic(nn.Module):
 # Replay Buffer
 class ReplayBuffer:
     def __init__(self, max_size=100000):
-        self.buffer = []
+        self.buffer = deque(maxlen=max_size) #Use deque instead of list for faster operation
         self.max_size = max_size
 
     def add(self, state, action, reward, next_state, done):
@@ -66,7 +66,7 @@ class ReplayBuffer:
 
 # DDPG Agent
 class TD3Agent:
-    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-5, policy_noise=0.8, noise_clip=1.5, policy_delay=2):
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-4, policy_noise=0.3, noise_clip=0.7, policy_delay=3):
         self.actor = Actor(state_dim, action_dim, max_action).cuda()
         self.actor_target = Actor(state_dim, action_dim, max_action).cuda()
         self.actor_target.load_state_dict(self.actor.state_dict())
@@ -101,7 +101,9 @@ class TD3Agent:
 
         # Add exploration noise
         action = action.cpu().data.numpy().flatten()  # Convert back to NumPy for further manipulation (optional)
-        action = action + np.random.normal(0, exploration_noise, size=action.shape).clip(-self.noise_clip, self.noise_clip)  # Add noise for exploration
+        # action = action + np.random.normal(0, exploration_noise, size=action.shape).clip(-self.noise_clip, self.noise_clip)  # Add noise for exploration
+        action = action + np.clip(np.random.normal(0, exploration_noise, size=action.shape), -self.noise_clip, self.noise_clip)
+
 
         # Clip to valid action range
         action = np.clip(action, -self.max_action, self.max_action)
@@ -120,7 +122,7 @@ class TD3Agent:
         # print(f"Actions shape after noise: {next_actions.shape}")
         return next_actions
         
-    def train(self, batch_size=64):
+    def train(self, batch_size=128):
         if len(self.replay_buffer.buffer) < batch_size:
                     return
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)

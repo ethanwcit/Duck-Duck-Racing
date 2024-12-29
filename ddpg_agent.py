@@ -54,7 +54,7 @@ class ReplayBuffer:
 
 # DDPG Agent
 class DDPGAgent:
-    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=1e-3):
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=1e-3, noise_clip=1.2):
         self.actor = Actor(state_dim, action_dim, max_action).cuda()
         self.actor_target = Actor(state_dim, action_dim, max_action).cuda()
         self.actor_target.load_state_dict(self.actor.state_dict())
@@ -64,16 +64,30 @@ class DDPGAgent:
         self.critic_target = Critic(state_dim, action_dim).cuda()
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=lr)
-
+        self.noise_clip = noise_clip
         self.replay_buffer = ReplayBuffer()
         self.gamma = gamma
         self.tau = tau
         self.max_action = max_action
 
-    def select_action(self, state):
-        state = torch.FloatTensor(state).unsqueeze(0).cuda()
-        return self.actor(state).cpu().data.numpy().flatten()
+    # def select_action(self, state):
+    #     state = torch.FloatTensor(state).unsqueeze(0).cuda()
+    #     return self.actor(state).cpu().data.numpy().flatten()
+    def select_action(self, state, exploration_noise=0.7):
+        # Convert state to a PyTorch tensor if it's not already
+        state = torch.FloatTensor(state).unsqueeze(0).cuda()  # Ensure it's a 2D tensor for batch input
 
+        # Get action from the actor network
+        action = self.actor(state)  
+
+        # Add exploration noise
+        action = action.cpu().data.numpy().flatten()  # Convert back to NumPy for further manipulation (optional)
+        action = action + np.random.normal(0, exploration_noise, size=action.shape).clip(-self.noise_clip, self.noise_clip)  # Add noise for exploration
+
+        # Clip to valid action range
+        action = np.clip(action, -self.max_action, self.max_action)
+        
+        return action
     def train(self, batch_size=64):
         if len(self.replay_buffer.buffer) < batch_size:
             return

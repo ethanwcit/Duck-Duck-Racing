@@ -4,7 +4,7 @@ import numpy as np
 import math
 from ddpg_agent import DDPGAgent
 from td3_agent import TD3Agent
-LAP_REWARD = 100  # Reward for completing a lap
+LAP_REWARD = 1  # Reward for completing a lap
 
 SCREEN_WIDTH = 1244
 SCREEN_HEIGHT = 1016
@@ -33,31 +33,39 @@ class Car(pygame.sprite.Sprite):
         self.lap_progress = 0  # Track progress around the lap
         self.total_laps = 0# Total laps to complete
         self.checkpoints = [
-            (900, 110),
-            (140, 500),
-            (570, 870)
+            (570, 780, 5, 160),
+            (900, 750, 5, 160),
+            (140, 500, 160, 5)   
         ]
-        self.last_checkpoint = -1
+        self.last_checkpoint_i = -1
+        self.next_checkpoint_i = 1
 
     def update_lap_progress(self):
         """
         Check if the car has reached the next checkpoint. If all checkpoints are passed
         sequentially, the lap is completed.
         """
-        for i, checkpoint in enumerate(self.checkpoints):
-            if i == self.last_checkpoint:
-                continue  # Skip already passed checkpoints
-                
-            print( math.dist(self.rect.center, checkpoint), checkpoint)
-            if math.dist(self.rect.center, checkpoint) < 10:  # Checkpoint radius threshold
-                self.last_checkpoint = i
-    
-                self.lap_progress += 1
-                if i == len(self.checkpoints) - 1:  # If last checkpoint, lap is completed
-                    self.total_laps += 1
-                    self.lap_progress = 0
-                    self.last_checkpoint = -1  # Reset for the next lap
-                break
+        next_checkpoint = self.checkpoints[self.next_checkpoint_i]
+        # Calculate the center of the checkpoint
+        checkpoint_center = (
+            next_checkpoint[0] + next_checkpoint[2] / 2,  # Center X
+            next_checkpoint[1] + next_checkpoint[3] / 2   # Center Y
+        )
+
+        # Calculate distance from car's center to checkpoint center
+        distance_to_checkpoint = math.dist(self.rect.center, checkpoint_center)
+
+        if distance_to_checkpoint < 50:  # Distance threshold
+            self.last_checkpoint_i = self.next_checkpoint_i
+            self.next_checkpoint_i = (self.next_checkpoint_i + 1) % len(self.checkpoints)
+            self.lap_progress += 1
+            print("lap_progress", self.lap_progress, "next_checkpoint", self.next_checkpoint_i, self.last_checkpoint_i)
+            if self.last_checkpoint_i == 0:
+                self.total_laps += 1
+                self.lap_progress = 0
+                self.last_checkpoint_i = -1
+
+
     def update(self):
         self.radars.clear()
         self.drive()
@@ -144,7 +152,7 @@ def main():
 
     # Training parameters
     total_episodes = 1000  # Total number of episodes to run
-    max_timesteps = 1000  # Max timesteps per episode
+    max_timesteps = 10000  # Max timesteps per episode
 
     for episode in range(total_episodes):
         # Reset cars at the start of each episode
@@ -163,10 +171,13 @@ def main():
             SCREEN.blit(TRACK, (0, 0))
             # Draw checkpoints
             for i, checkpoint in enumerate(cars[0].checkpoints):
-                if i == 0:
-                    pygame.draw.rect(SCREEN, (107,19,145), (checkpoint[0], checkpoint[1], 5, 160))
-                elif i == 1:
-                    pygame.draw.rect(SCREEN, (191,19,19), (checkpoint[0], checkpoint[1], 160, 5))
+                if i == 1:
+                    pygame.draw.rect(SCREEN, (107,19,145), checkpoint)
+                elif i == 2:
+                    pygame.draw.rect(SCREEN, (191,19,19), checkpoint)
+                elif i == 0:
+                    pygame.draw.rect(SCREEN, (80,90,145), checkpoint)
+
 
             for i, car in enumerate(cars):
                 if not car.alive:
@@ -177,12 +188,13 @@ def main():
                 state = np.array(state, dtype=np.float32) / 200  # Normalize radar distances
 
                 # Select action using the agent
-                exploration_noise = 0.8 if episode < 300 else 0.1  # Dynamic noise for exploration
-                action = agents[i].select_action(state, exploration_noise)
+                exploration_noise = 0.3 if episode < 300 else 0.1  # Dynamic noise for exploration
+                action = agents[i].select_action(state , exploration_noise)
+                # print(action)
                 # Map action to car direction
-                if action > 0.7:
+                if action > 0.5:
                     car.target_direction = 1  # Turn right
-                elif action < -0.7:
+                elif action < -0.5:
                     car.target_direction = -1  # Turn left
                 else:
                     car.target_direction = 0  # Go straight
@@ -191,15 +203,15 @@ def main():
                 car.update()
                 # Compute reward
                 if car.alive:
-                    reward = 1.0  # Reward for staying alive
-                    print(f"Car {i + 1}: lap = {car.lap_progress}")  if car.lap_progress > 0 else None
+                    reward = 0.3  # Reward for staying alive
+                    # print(f"Car {i + 1}: lap = {car.lap_progress}")  if car.lap_progress > 0 else None
                     reward += car.lap_progress * LAP_REWARD  # Additional reward for laps completed
                     total_rewards[i] += reward
                     next_state = car.data()
                     next_state = np.array(next_state, dtype=np.float32) / 200  # Normalize radar distances
                     done = episode_timesteps >= max_timesteps
                 else:
-                    reward = -10.0  # Penalty for collision
+                    reward = -1000.0  # Penalty for collision
                     done = True
                     next_state = np.zeros_like(state, dtype=np.float32)  # Placeholder for next_state
                 # Store transition in replay buffer
