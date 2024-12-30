@@ -40,12 +40,14 @@ class ReplayBuffer:
         self.max_size = max_size
 
     def add(self, state, action, reward, next_state, done):
-        # Ensure all inputs have consistent shapes
-        state = np.array(state, dtype=np.float32)
-        action = np.array(action, dtype=np.float32)
-        reward = float(reward)
-        next_state = np.array(next_state, dtype=np.float32)
-        done = float(done)
+        # Detach the tensor, move it to CPU, and convert to numpy array
+        action = action.detach().cpu().numpy() if isinstance(action, torch.Tensor) else np.array(action, dtype=np.float32)
+        reward = reward.detach().cpu().numpy() if isinstance(reward, torch.Tensor) else np.array(reward, dtype=np.float32)
+        next_state = next_state.detach().cpu().numpy() if isinstance(next_state, torch.Tensor) else np.array(next_state, dtype=np.float32)
+        done = done.detach().cpu().numpy() if isinstance(done, torch.Tensor) else np.array(done, dtype=np.float32)
+
+        # Add the transition to the replay buffer (example)
+        self.buffer.append((state, action, reward, next_state, done))
 
         # Add transition to the buffer
         self.buffer.append((state, action, reward, next_state, done))
@@ -63,26 +65,49 @@ class ReplayBuffer:
             np.array(next_states, dtype=np.float32),
             np.array(dones, dtype=np.float32),
         )
+    
+class OUNoise:
+    def __init__(self, action_dim, mu=0, theta=0.15, sigma=0.2):
+        self.mu = mu  # Mean of the noise
+        self.theta = theta  # Mean reversion rate
+        self.sigma = sigma  # Volatility
+        self.state = np.ones(action_dim) * mu  # Initial state (noise)
+        self.action_dim = action_dim
+
+    def reset(self):
+        """Reset the noise state."""
+        self.state = np.ones(self.action_dim) * self.mu
+
+    def sample(self):
+        """Generate a noise sample."""
+        x = self.state
+        dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(self.action_dim)
+        self.state = x + dx
+        return self.state
+
 
 # DDPG Agent
 class TD3Agent:
-    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-4, policy_noise=0.3, noise_clip=0.7, policy_delay=3):
-        self.actor = Actor(state_dim, action_dim, max_action).cuda()
-        self.actor_target = Actor(state_dim, action_dim, max_action).cuda()
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-4, policy_noise=0.5, noise_clip=2.0, policy_delay=2):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
+        self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-5)
 
-        self.critic1 = Critic(state_dim, action_dim).cuda()
-        self.critic2 = Critic(state_dim, action_dim).cuda()
-        self.critic1_target = Critic(state_dim, action_dim).cuda()
-        self.critic2_target = Critic(state_dim, action_dim).cuda()
+        self.critic1 = Critic(state_dim, action_dim).to(self.device)
+        self.critic2 = Critic(state_dim, action_dim).to(self.device)
+        self.critic1_target = Critic(state_dim, action_dim).to(self.device)
+        self.critic2_target = Critic(state_dim, action_dim).to(self.device)
 
         self.critic1_target.load_state_dict(self.critic1.state_dict())
         self.critic2_target.load_state_dict(self.critic2.state_dict())
 
-        self.critic_optimizer1 = optim.Adam(self.critic1.parameters(), lr=lr)
-        self.critic_optimizer2 = optim.Adam(self.critic2.parameters(), lr=lr)
+        self.critic_optimizer1 = optim.Adam(self.critic1.parameters(), lr=5e-4)
+        self.critic_optimizer2 = optim.Adam(self.critic2.parameters(), lr=5e-4)
 
+        self.noise = OUNoise(action_dim)
         self.action_dim = action_dim
         self.replay_buffer = ReplayBuffer()
         self.gamma = gamma
@@ -92,45 +117,67 @@ class TD3Agent:
         self.noise_clip = noise_clip
         self.policy_delay = policy_delay
         self.count = 0
-    def select_action(self, state, exploration_noise=0.7):
-        # Convert state to a PyTorch tensor if it's not already
-        state = torch.FloatTensor(state).unsqueeze(0).cuda()  # Ensure it's a 2D tensor for batch input
 
-        # Get action from the actor network
-        action = self.actor(state)  
+        # Noise decay parameters
+        self.noise_decay = 0.995  # Decay factor
+        self.noise_min = 0.1  # Minimum noise level
 
-        # Add exploration noise
-        action = action.cpu().data.numpy().flatten()  # Convert back to NumPy for further manipulation (optional)
-        # action = action + np.random.normal(0, exploration_noise, size=action.shape).clip(-self.noise_clip, self.noise_clip)  # Add noise for exploration
-        action = action + np.clip(np.random.normal(0, exploration_noise, size=action.shape), -self.noise_clip, self.noise_clip)
+    def add_to_replay(self, state, action, reward, next_state, done):
+        self.replay_buffer.add(state, action, reward, next_state, done)
+
+    # def select_action(self, state, exploration_noise=0.7):
+    #     # Convert state to a PyTorch tensor if it's not already
+    #     state = torch.FloatTensor(state).unsqueeze(0).cuda()  # Ensure it's a 2D tensor for batch input
+
+    #     # Get action from the actor network
+    #     action = self.actor(state)  
+
+    #     # Add exploration noise
+    #     action = action.gpu().data.numpy().flatten()  # Convert back to NumPy for further manipulation 
+    #     # action = action + np.random.normal(0, exploration_noise, size=action.shape).clip(-self.noise_clip, self.noise_clip)  # Add noise for exploration
+    #     action = action + np.clip(np.random.normal(0, exploration_noise, size=action.shape), -self.noise_clip, self.noise_clip)
 
 
-        # Clip to valid action range
-        action = np.clip(action, -self.max_action, self.max_action)
+    #     # Clip to valid action range
+    #     action = np.clip(action, -self.max_action, self.max_action)
         
+    #     return action
+    def select_action(self, state, exploration_noise=0.1):
+        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # Ensure it's a 2D tensor for batch input
+        action = self.actor(state)
+        noise = self.noise.sample() * exploration_noise
+        action = action + torch.tensor(noise).float().to(self.device)  # Add noise to action
+        action = torch.clamp(action, -self.max_action, self.max_action)  # Clip action
+        action = action.cpu().data.numpy().flatten()  # Convert back to NumPy
+        # print(action)
         return action
+    
+    def update_noise(self, episode):
+        """Decay the noise as the episodes progress."""
+        noise_scale = max(self.noise_min, self.noise_decay ** episode)
+        self.noise.sigma = noise_scale  # Reduce the noise amplitude
+
     def apply_policy_noise(self, next_states):
         # Get the actions predicted by the actor_target
         next_actions = self.actor_target(next_states)
         
-        # Generate noise of the same shape as the actions
-        noise = (torch.randn_like(next_actions) * self.policy_noise).clamp(-self.noise_clip, self.noise_clip)
-        
-        # Add noise to the actions and clamp to valid range
-        next_actions = (next_actions + noise).clamp(-self.max_action, self.max_action)
-        
-        # print(f"Actions shape after noise: {next_actions.shape}")
+        noise = self.noise.sample() * self.policy_noise
+        next_actions = next_actions + torch.tensor(noise).float().to(self.device)  # Add noise to action
+        next_actions = torch.clamp(next_actions, -self.max_action, self.max_action)  # Clip action
+        # next_actions = next_actions.cpu().data.numpy().flatten()  # Convert back to NumPy f
+        # print(next_actions.shape, next_actions)
         return next_actions
+
         
-    def train(self, batch_size=128):
+    def train(self, batch_size=64):
         if len(self.replay_buffer.buffer) < batch_size:
                     return
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
-        states = torch.FloatTensor(states).cuda()
-        actions = torch.FloatTensor(actions).cuda()
-        rewards = torch.FloatTensor(rewards).unsqueeze(1).cuda()
-        next_states = torch.FloatTensor(next_states).cuda()
-        dones = torch.FloatTensor(dones).unsqueeze(1).cuda()
+        states = torch.FloatTensor(states).to(self.device)
+        actions = torch.FloatTensor(actions).to(self.device)
+        rewards = torch.FloatTensor(rewards).unsqueeze(1).to(self.device)
+        next_states = torch.FloatTensor(next_states).to(self.device)
+        dones = torch.FloatTensor(dones).unsqueeze(1).to(self.device)
 
         # Add noise to actions for target policy smoothing
         next_actions = self.apply_policy_noise(next_states)
