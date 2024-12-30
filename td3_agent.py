@@ -45,14 +45,10 @@ class ReplayBuffer:
         reward = reward.detach().cpu().numpy() if isinstance(reward, torch.Tensor) else np.array(reward, dtype=np.float32)
         next_state = next_state.detach().cpu().numpy() if isinstance(next_state, torch.Tensor) else np.array(next_state, dtype=np.float32)
         done = done.detach().cpu().numpy() if isinstance(done, torch.Tensor) else np.array(done, dtype=np.float32)
-
-        # Add the transition to the replay buffer (example)
-        self.buffer.append((state, action, reward, next_state, done))
-
         # Add transition to the buffer
         self.buffer.append((state, action, reward, next_state, done))
-        if len(self.buffer) > self.max_size:
-            self.buffer.pop(0)
+        # if len(self.buffer) > self.max_size:
+        #     self.buffer.pop(0)
 
     def sample(self, batch_size):
         indices = np.random.choice(len(self.buffer), batch_size, replace=False)
@@ -83,18 +79,19 @@ class OUNoise:
         x = self.state
         dx = self.theta * (self.mu - x) + self.sigma * np.random.randn(self.action_dim)
         self.state = x + dx
+        # print(self.state)
         return self.state
 
 
 # DDPG Agent
 class TD3Agent:
-    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-4, policy_noise=0.5, noise_clip=2.0, policy_delay=2):
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-4, policy_noise=0.4 , noise_clip=1.0, policy_delay=2):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-5)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-3)
 
         self.critic1 = Critic(state_dim, action_dim).to(self.device)
         self.critic2 = Critic(state_dim, action_dim).to(self.device)
@@ -104,8 +101,8 @@ class TD3Agent:
         self.critic1_target.load_state_dict(self.critic1.state_dict())
         self.critic2_target.load_state_dict(self.critic2.state_dict())
 
-        self.critic_optimizer1 = optim.Adam(self.critic1.parameters(), lr=5e-4)
-        self.critic_optimizer2 = optim.Adam(self.critic2.parameters(), lr=5e-4)
+        self.critic_optimizer1 = optim.Adam(self.critic1.parameters(), lr=5e-2)
+        self.critic_optimizer2 = optim.Adam(self.critic2.parameters(), lr=5e-2)
 
         self.noise = OUNoise(action_dim)
         self.action_dim = action_dim
@@ -120,37 +117,39 @@ class TD3Agent:
 
         # Noise decay parameters
         self.noise_decay = 0.995  # Decay factor
-        self.noise_min = 0.1  # Minimum noise level
+        self.noise_min = 0.05  # Minimum noise level
 
     def add_to_replay(self, state, action, reward, next_state, done):
         self.replay_buffer.add(state, action, reward, next_state, done)
 
-    # def select_action(self, state, exploration_noise=0.7):
-    #     # Convert state to a PyTorch tensor if it's not already
-    #     state = torch.FloatTensor(state).unsqueeze(0).cuda()  # Ensure it's a 2D tensor for batch input
+    def select_action(self, state, exploration_noise=0.7):
+        # Convert state to a PyTorch tensor if it's not already
+        state = torch.FloatTensor(state).unsqueeze(0).cuda()  # Ensure it's a 2D tensor for batch input
 
-    #     # Get action from the actor network
-    #     action = self.actor(state)  
+        # Get action from the actor network
+        action = self.actor(state)  
 
-    #     # Add exploration noise
-    #     action = action.gpu().data.numpy().flatten()  # Convert back to NumPy for further manipulation 
-    #     # action = action + np.random.normal(0, exploration_noise, size=action.shape).clip(-self.noise_clip, self.noise_clip)  # Add noise for exploration
-    #     action = action + np.clip(np.random.normal(0, exploration_noise, size=action.shape), -self.noise_clip, self.noise_clip)
+        # Add exploration noise
+        action = action.cpu().data.numpy().flatten()  # Convert back to NumPy for further manipulation 
+        # action = action + np.random.normal(0, exploration_noise, size=action.shape).clip(-self.noise_clip, self.noise_clip)  # Add noise for exploration
+        action = action + np.clip(np.random.normal(0, exploration_noise, size=action.shape), -self.noise_clip, self.noise_clip)
 
 
-    #     # Clip to valid action range
-    #     action = np.clip(action, -self.max_action, self.max_action)
+        # Clip to valid action range
+        action = np.clip(action, -self.max_action, self.max_action)
         
-    #     return action
-    def select_action(self, state, exploration_noise=0.1):
-        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # Ensure it's a 2D tensor for batch input
-        action = self.actor(state)
-        noise = self.noise.sample() * exploration_noise
-        action = action + torch.tensor(noise).float().to(self.device)  # Add noise to action
-        action = torch.clamp(action, -self.max_action, self.max_action)  # Clip action
-        action = action.cpu().data.numpy().flatten()  # Convert back to NumPy
-        # print(action)
         return action
+    # def select_action(self, state, exploration_noise=0.1):
+    #     state = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # Ensure it's a 2D tensor for batch input
+    #     action = self.actor(state)
+    #     # print(f"before {action}")
+    #     noise = self.noise.sample() #* exploration_noise
+    #     action = action + torch.tensor(noise).float().to(self.device)  # Add noise to action
+    #     # print(action)
+    #     action = torch.clamp(action, -self.max_action, self.max_action)  # Clip action
+    #     action = action.cpu().data.numpy().flatten()  # Convert back to NumPy
+    #     # print(action)
+    #     return action
     
     def update_noise(self, episode):
         """Decay the noise as the episodes progress."""
@@ -161,7 +160,7 @@ class TD3Agent:
         # Get the actions predicted by the actor_target
         next_actions = self.actor_target(next_states)
         
-        noise = self.noise.sample() * self.policy_noise
+        noise = self.policy_noise # self.noise.sample() #* self.policy_noise
         next_actions = next_actions + torch.tensor(noise).float().to(self.device)  # Add noise to action
         next_actions = torch.clamp(next_actions, -self.max_action, self.max_action)  # Clip action
         # next_actions = next_actions.cpu().data.numpy().flatten()  # Convert back to NumPy f

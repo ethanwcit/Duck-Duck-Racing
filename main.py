@@ -5,13 +5,13 @@ import math
 from ddpg_agent import DDPGAgent
 from td3_agent import TD3Agent
 
-CHECKPOINT_REWARD = 6  # Reward for crossing a checkpoint
-LAP_REWARD = 9  # Reward for completing a lap
-COIN_REWARD = 4  # Reward for collecting a coin
+CHECKPOINT_REWARD = 60  # Reward for crossing a checkpoint
+LAP_REWARD = 90  # Reward for completing a lap
+COIN_REWARD = 40 # Reward for collecting a coin
 SCREEN_WIDTH = 1244
 SCREEN_HEIGHT = 1016
 FPS = 60
-pygame.init() 
+pygame.init()
 pygame.display.set_caption('Duck Duck: RACING')
 SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 ICON = pygame.image.load(os.path.join("Assets", "ddpg.png"))
@@ -20,6 +20,7 @@ TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
 
 # Change based on agent used
 DUCK = "td3.png"
+
 class Coin(pygame.sprite.Sprite):
     def __init__(self, x, y):
         super().__init__()
@@ -30,7 +31,6 @@ class Coin(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=(x, y))
         self.collected = False
 
-
     def gray_out(self):
         self.image = pygame.transform.scale(self.gray_image, (self.scale, self.scale))
 
@@ -38,7 +38,7 @@ class Coin(pygame.sprite.Sprite):
         self.image = pygame.transform.scale(self.original_image, (self.scale, self.scale))
         self.collected = False
 
-class duck_racer(pygame.sprite.Sprite):
+class DuckRacer(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
         self.original_image = pygame.image.load(os.path.join("Assets", DUCK))
@@ -49,19 +49,26 @@ class duck_racer(pygame.sprite.Sprite):
         self.rotation_vel = 5
         self.direction = 0
         self.target_direction = 0  # Direction based on action
+        self.target_velocity = 6  # Velocity based on action
+        self.current_velocity = 0 
         self.alive = True
         self.radars = []
-        self.filter_alpha = 0.7  # Low-pass filter alpha
+        self.filter_alpha = 0.4  # Low-pass filter alpha
+        self.smoothing_factor = 0.1
         self.lap_progress = 0  # Track progress around the lap
         self.total_laps = 0  # Total laps to complete
-        self.checkpoints = [
+        self.checkpoints = [ # Checkpoints coordinates
             (570, 780, 5, 160),
             (900, 750, 5, 160),
+            (900, 110, 5, 160),
             (140, 500, 160, 5)   
         ]
         self.last_checkpoint_i = -1
         self.next_checkpoint_i = 1
+        self.coins_collected_in_lap = set()  # Set to store indices of collected coins
         self.lap_start_time = self.start_new_lap()  # Time when the lap started
+        self.radar_min = 0
+        self.radar_max = 200
 
     def update_lap_progress(self):
         """
@@ -81,13 +88,12 @@ class duck_racer(pygame.sprite.Sprite):
             self.lap_progress += 1
             print(f"Lap progress: {self.lap_progress}/3 , Next checkpoint: {self.next_checkpoint_i}")
             # Check if lap is completed
-            if self.lap_progress == 3:
+            if self.lap_progress == len(self.checkpoints):
                 self.total_laps += 1
                 self.lap_progress = 0
                 self.last_checkpoint_i = -1
                 # Calculate lap time if lap is completed
                 lap_time = pygame.time.get_ticks() - self.lap_start_time
-                # reward = LAP_REWARD + max(0, 1000 - lap_time // 100)  # Reward based on lap time (faster is better)
                 reward = LAP_REWARD + max(0, 1000 * (0.99 ** (lap_time // 100)))  # Exponential decay function for reward
                 print(f"Lap completed in {lap_time / 1000:.2f} seconds. Reward: {reward}")
                 self.start_new_lap()  # Start a new lap and track the time
@@ -99,47 +105,44 @@ class duck_racer(pygame.sprite.Sprite):
 
     def start_new_lap(self):
         """Start a new lap and record the start time."""
+        self.coins_collected_in_lap.clear()  # Clear the coins collected for the new lap
         self.lap_start_time = pygame.time.get_ticks()
-        # print(f"Lap started {self.lap_start_time/1000} seconds")
         return self.lap_start_time
 
-    # def check_coin_collision(self, coins):
-    #     collided_coins = pygame.sprite.spritecollide(self, coins, False)
-    #     reward = 0
-    #     for coin in collided_coins:
-    #                 if not coin.collected:
-    #                     coin.collected = True
-    #                     coin.gray_out()
-    #                     pygame.time.set_timer(pygame.USEREVENT + coins.sprites().index(coin), 500)  # Reset color after 1 second
-    #                     reward += COIN_REWARD
-    #     return reward
     def check_coin_collision(self, coins):
         reward = 0
-        for coin in coins:
+        for index, coin in enumerate(coins):
+            # Skip if the coin has already been collected in this lap
+            if index in self.coins_collected_in_lap:
+                continue
+
             # Calculate the distance between the center of the car and the coin
             distance = math.dist(self.rect.center, coin.rect.center)
 
             # Set a custom collision tolerance
             collision_tolerance = 50 
 
-            if distance < collision_tolerance and not coin.collected:
+            if distance < collision_tolerance:
                 coin.collected = True
                 coin.gray_out()
-                pygame.time.set_timer(pygame.USEREVENT + coins.sprites().index(coin), 500)  # Reset color after half a second
+                pygame.time.set_timer(pygame.USEREVENT + index, 1000)  # Reset color after half a second
+                self.coins_collected_in_lap.add(index)  # Add coin index to the set
                 reward += COIN_REWARD
         return reward
 
+
     def update(self):
         self.radars.clear()
-        self.drive()
         self.rotate()
+        self.drive()
         for radar_angle in (-60, -30, 0, 30, 60):
             self.radar(radar_angle)
         self.collision()
 
     def drive(self):
-        self.rect.center += self.vel_vector * 6
-
+        self.current_velocity += (self.target_velocity - self.current_velocity) * self.smoothing_factor
+        self.vel_vector = self.vel_vector.normalize() * self.current_velocity  # Apply smoothed velocity
+        self.rect.center += self.vel_vector
     def collision(self):
         length = 40
         collision_point_right = [int(self.rect.center[0] + math.cos(math.radians(self.angle + 18)) * length),
@@ -155,7 +158,6 @@ class duck_racer(pygame.sprite.Sprite):
         pygame.draw.circle(SCREEN, (0, 255, 255, 0), collision_point_left, 4)
 
     def rotate(self):
-        # self.direction = (1 - self.filter_alpha) * self.direction + self.filter_alpha * self.target_direction
         self.direction = (1 - self.filter_alpha) * self.direction + self.filter_alpha * self.target_direction
 
         if abs(self.direction - self.target_direction) < 0.05:
@@ -193,21 +195,19 @@ class duck_racer(pygame.sprite.Sprite):
         input = [0, 0, 0, 0, 0]
         for i, radar in enumerate(self.radars):
             input[i] = int(radar[1])
-        return input
+        normalized_data = [(x - self.radar_min) / (self.radar_max - self.radar_min) for x in input]
+        return normalized_data
 
 def main():
     clock = pygame.time.Clock()
 
     num_agents = 3
     state_dim = 5
-    action_dim = 1
+    action_dim = 2  
     max_action = 1
 
     agents = [TD3Agent(state_dim, action_dim, max_action) for _ in range(num_agents)]
-    # cars = [Car() for _ in range(num_agents)]
-    # car_groups = pygame.sprite.Group(*cars)
 
-    # Initialise coins
     coins = pygame.sprite.Group(
         Coin(980, 250),
         Coin(600, 130),
@@ -216,10 +216,10 @@ def main():
     )
 
     total_episodes = 1000
-    max_timesteps = 10000
+    max_timesteps = 5000
 
     for episode in range(total_episodes):
-        ducks = [duck_racer() for _ in range(num_agents)]
+        ducks = [DuckRacer() for _ in range(num_agents)]
         duck_groups = pygame.sprite.Group(*ducks)
         total_rewards = [0] * num_agents
         episode_timesteps = 0
@@ -242,46 +242,60 @@ def main():
             for i, duck in enumerate(ducks):
                 if not duck.alive:
                     continue
+                reward = 0
                 state = duck.data()
-                state = np.array(state, dtype=np.float32) #/ 200
+                state = np.array(state, dtype=np.float32)
 
-                # exploration_noise = 0.9 if episode < 300 else 0.1
-                exploration_noise = 0.5
+                exploration_noise = 0.4
                 action = agents[i].select_action(state, exploration_noise)
+                # print(action[0])
+                duck.target_direction = 1 if action[0] > 0.5 else -1 if action[0] < -0.5 else 0
 
-                if action > 0.5:
-                    duck.target_direction = 1
-                elif action < -0.5:
-                    duck.target_direction = -1
-                else:
-                    duck.target_direction = 0
+                # print(duck.target_direction)
+                duck.target_velocity = max(2, min(10, action[1]*7))
+                next_checkpoint = duck.checkpoints[duck.next_checkpoint_i]
+                checkpoint_center = (
+                    next_checkpoint[0] + next_checkpoint[2] / 2,  # Center X
+                    next_checkpoint[1] + next_checkpoint[3] / 2   # Center Y
+                )
+                checkpoint_vector = pygame.math.Vector2(checkpoint_center) - pygame.math.Vector2(duck.rect.center)
+                # print(checkpoint_vector)
+                dot_product = duck.vel_vector.dot(checkpoint_vector.normalize())
+                # reward = max(-0.5, dot_product )  # Reward increases as dot product increases 
+                # reward = dot_product
+                # print(f"Car: {i} Dot product: {dot_product}, next checkpoint: {next_checkpoint}")
+                if dot_product < 0:
+                    reward = dot_product * 30  # Reward for moving away the checkpoint
+                if dot_product > 0:
+                    reward = dot_product  # Reward for moving towards the checkpoint
 
+                # print(duck.target_velocity)
                 duck.update()
-                reward = duck.update_lap_progress()
+                reward += duck.update_lap_progress()
                 reward += duck.check_coin_collision(coins)
                 agents[i].update_noise(episode)
-                print(f"duck: {i} reward: {reward}") if reward != 0 else None
                 if not duck.alive:
-                    reward = -100.0
+                    reward = -1000
                     done = True
                     next_state = np.zeros_like(state, dtype=np.float32)
                 else:
                     reward += 0.0001
                     total_rewards[i] += reward
                     next_state = duck.data()
-                    next_state = np.array(next_state, dtype=np.float32)# / 200
+                    next_state = np.array(next_state, dtype=np.float32)
                     done = episode_timesteps >= max_timesteps
 
+                # if reward != 0:
+                #     print(f"Duck: {i} Reward: {reward}")
                 agents[i].add_to_replay(state, action, reward, next_state, done)
-                agents[i].train(batch_size=128)
+                agents[i].train(batch_size=256)
 
             episode_timesteps += 1
 
             if all(not duck.alive for duck in ducks) or episode_timesteps >= max_timesteps:
-                print("\n")
-                print(f"----------------Episode {episode + 1}/{total_episodes} ended.----------------")
+                print(f"\n----------------Episode {episode + 1}/{total_episodes} ended.----------------")
                 for j, reward in enumerate(total_rewards):
-                    print(f"Car {j + 1}: Total reward = {reward}")
+                    print(f"Duck {j + 1}: Total reward = {reward}")
                 break
 
             duck_groups.draw(SCREEN)
