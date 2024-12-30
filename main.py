@@ -38,7 +38,7 @@ class Coin(pygame.sprite.Sprite):
         self.image = pygame.transform.scale(self.original_image, (self.scale, self.scale))
         self.collected = False
 
-class Car(pygame.sprite.Sprite):
+class duck_racer(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
         self.original_image = pygame.image.load(os.path.join("Assets", DUCK))
@@ -156,7 +156,7 @@ class Car(pygame.sprite.Sprite):
 
     def rotate(self):
         # self.direction = (1 - self.filter_alpha) * self.direction + self.filter_alpha * self.target_direction
-        self.direction = self.target_direction
+        self.direction = (1 - self.filter_alpha) * self.direction + self.filter_alpha * self.target_direction
 
         if abs(self.direction - self.target_direction) < 0.05:
             self.direction = self.target_direction
@@ -219,8 +219,8 @@ def main():
     max_timesteps = 10000
 
     for episode in range(total_episodes):
-        cars = [Car() for _ in range(num_agents)]
-        car_groups = pygame.sprite.Group(*cars)
+        ducks = [duck_racer() for _ in range(num_agents)]
+        duck_groups = pygame.sprite.Group(*ducks)
         total_rewards = [0] * num_agents
         episode_timesteps = 0
         paused = False
@@ -236,13 +236,13 @@ def main():
 
             SCREEN.blit(TRACK, (0, 0))
             coins.draw(SCREEN)
-            for i, checkpoint in enumerate(cars[0].checkpoints):
+            for i, checkpoint in enumerate(ducks[0].checkpoints):
                 pygame.draw.rect(SCREEN, (80, 90, 145), checkpoint)
 
-            for i, car in enumerate(cars):
-                if not car.alive:
+            for i, duck in enumerate(ducks):
+                if not duck.alive:
                     continue
-                state = car.data()
+                state = duck.data()
                 state = np.array(state, dtype=np.float32) #/ 200
 
                 # exploration_noise = 0.9 if episode < 300 else 0.1
@@ -250,25 +250,25 @@ def main():
                 action = agents[i].select_action(state, exploration_noise)
 
                 if action > 0.5:
-                    car.target_direction = 1
+                    duck.target_direction = 1
                 elif action < -0.5:
-                    car.target_direction = -1
+                    duck.target_direction = -1
                 else:
-                    car.target_direction = 0
+                    duck.target_direction = 0
 
-                car.update()
-                reward = car.update_lap_progress()
-                reward += car.check_coin_collision(coins)
+                duck.update()
+                reward = duck.update_lap_progress()
+                reward += duck.check_coin_collision(coins)
                 agents[i].update_noise(episode)
-                print(f"car: {i} reward: {reward}") if reward != 0 else None
-                if not car.alive:
+                print(f"duck: {i} reward: {reward}") if reward != 0 else None
+                if not duck.alive:
                     reward = -100.0
                     done = True
                     next_state = np.zeros_like(state, dtype=np.float32)
                 else:
                     reward += 0.0001
                     total_rewards[i] += reward
-                    next_state = car.data()
+                    next_state = duck.data()
                     next_state = np.array(next_state, dtype=np.float32)# / 200
                     done = episode_timesteps >= max_timesteps
 
@@ -277,14 +277,14 @@ def main():
 
             episode_timesteps += 1
 
-            if all(not car.alive for car in cars) or episode_timesteps >= max_timesteps:
+            if all(not duck.alive for duck in ducks) or episode_timesteps >= max_timesteps:
                 print("\n")
                 print(f"----------------Episode {episode + 1}/{total_episodes} ended.----------------")
                 for j, reward in enumerate(total_rewards):
                     print(f"Car {j + 1}: Total reward = {reward}")
                 break
 
-            car_groups.draw(SCREEN)
+            duck_groups.draw(SCREEN)
             pygame.display.update()
             clock.tick(FPS)
 
