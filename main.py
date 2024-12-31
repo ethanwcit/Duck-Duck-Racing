@@ -5,9 +5,9 @@ import math
 from ddpg_agent import DDPGAgent
 from td3_agent import TD3Agent
 
-CHECKPOINT_REWARD = 60  # Reward for crossing a checkpoint
-LAP_REWARD = 90  # Reward for completing a lap
-COIN_REWARD = 40 # Reward for collecting a coin
+CHECKPOINT_REWARD = 600  # Reward for crossing a checkpoint
+LAP_REWARD = 900  # Reward for completing a lap
+COIN_REWARD = 400 # Reward for collecting a coin
 SCREEN_WIDTH = 1244
 SCREEN_HEIGHT = 1016
 FPS = 60
@@ -198,6 +198,37 @@ class DuckRacer(pygame.sprite.Sprite):
         normalized_data = [(x - self.radar_min) / (self.radar_max - self.radar_min) for x in input]
         return normalized_data
 
+def cal_checkpoint_reward(duck):
+    next_checkpoint = duck.checkpoints[duck.next_checkpoint_i]
+    checkpoint_center = (
+        next_checkpoint[0] + next_checkpoint[2] / 2,  # Center X
+        next_checkpoint[1] + next_checkpoint[3] / 2   # Center Y
+    )
+
+    # Vector from the duck to the checkpoint
+    checkpoint_vector = pygame.math.Vector2(checkpoint_center) - pygame.math.Vector2(duck.rect.center)
+    distance_to_checkpoint = checkpoint_vector.length()  # The distance to the checkpoint
+
+    # Dot product to determine if we are moving towards or away from the checkpoint
+    dot_product = duck.vel_vector.dot(checkpoint_vector.normalize())
+
+    # Reward based on both distance and movement direction
+    const =  0.5  # Constant for scaling
+    epsilon = 0.001  # Small epsilon to avoid division by zero
+
+    # Reward for distance: inversely proportional to distance (closer = higher reward)
+    reward_distance = const / (distance_to_checkpoint + epsilon)
+
+    # Reward for direction: proportional to the dot product (moving towards the checkpoint = higher reward)
+    reward_direction = dot_product * const
+    # Combine both rewards
+    reward = reward_distance + reward_direction
+
+    # If moving away from the checkpoint, penalize more
+    if dot_product < 0:
+        reward = dot_product * 20  # Strong negative reward for moving away
+    # print(f"Dot product: {dot_product}, Distance to checkpoint: {distance_to_checkpoint}, Next checkpoint: {next_checkpoint}")
+    return reward
 def main():
     clock = pygame.time.Clock()
 
@@ -248,28 +279,13 @@ def main():
 
                 exploration_noise = 0.4
                 action = agents[i].select_action(state, exploration_noise)
-                # print(action[0])
+
                 duck.target_direction = 1 if action[0] > 0.5 else -1 if action[0] < -0.5 else 0
-
-                # print(duck.target_direction)
                 duck.target_velocity = max(2, min(10, action[1]*7))
-                next_checkpoint = duck.checkpoints[duck.next_checkpoint_i]
-                checkpoint_center = (
-                    next_checkpoint[0] + next_checkpoint[2] / 2,  # Center X
-                    next_checkpoint[1] + next_checkpoint[3] / 2   # Center Y
-                )
-                checkpoint_vector = pygame.math.Vector2(checkpoint_center) - pygame.math.Vector2(duck.rect.center)
-                # print(checkpoint_vector)
-                dot_product = duck.vel_vector.dot(checkpoint_vector.normalize())
-                # reward = max(-0.5, dot_product )  # Reward increases as dot product increases 
-                # reward = dot_product
-                # print(f"Car: {i} Dot product: {dot_product}, next checkpoint: {next_checkpoint}")
-                if dot_product < 0:
-                    reward = dot_product * 30  # Reward for moving away the checkpoint
-                if dot_product > 0:
-                    reward = dot_product  # Reward for moving towards the checkpoint
 
-                # print(duck.target_velocity)
+                reward = cal_checkpoint_reward(duck)
+                # print(f"Reward: {reward}")
+
                 duck.update()
                 reward += duck.update_lap_progress()
                 reward += duck.check_coin_collision(coins)
