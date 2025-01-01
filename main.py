@@ -4,7 +4,9 @@ import numpy as np
 import math
 from ddpg_agent import DDPGAgent
 from td3_agent import TD3Agent
-
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+from scipy.ndimage import gaussian_filter
 CHECKPOINT_REWARD = 600  # Reward for crossing a checkpoint
 LAP_REWARD = 900  # Reward for completing a lap
 COIN_REWARD = 400 # Reward for collecting a coin
@@ -229,9 +231,43 @@ def cal_checkpoint_reward(duck):
         reward = dot_product * 20  # Strong negative reward for moving away
     # print(f"Dot product: {dot_product}, Distance to checkpoint: {distance_to_checkpoint}, Next checkpoint: {next_checkpoint}")
     return reward
+
+def create_heatmap(save_pos, screen_w, screen_h, track = "Assets\lake.png",output_file="heatmap.png"):
+    # Initialize a 2D array to count the frequency of positions
+    heatmap_arr = np.zeros((screen_h, screen_w))
+
+    for x, y in save_pos:
+        if 0 <= x < screen_w and 0 <= y < screen_h:
+            heatmap_arr[y, x] += 1
+
+    # Plot the heatmap using matplotlib
+    heatmap_arr = np.log1p(heatmap_arr)  # Logarithmic scaling
+    smoothed_heatmap = gaussian_filter(heatmap_arr, sigma=2.3)
+    # Load the environment image
+    env_map = mpimg.imread(track)
+
+    # Make sure environment image matches the heatmap dimensions
+    env_map_resized = np.resize(env_map, (screen_h, screen_w, 3))
+
+    # Plot the environment map and overlay the heatmap
+    plt.figure(figsize=(10, 8))
+    plt.imshow(env_map_resized, extent=[0, screen_w, 0, screen_h], alpha=0.7)
+    plt.imshow(smoothed_heatmap, cmap='hot', extent=[0, screen_w, 0, screen_h], alpha=0.77)
+    plt.colorbar(label="Frequency")
+    plt.title("Agent Position Heatmap with Environment Map Overlay")
+    plt.xlabel("X Position")
+    plt.ylabel("Y Position")
+
+    # Save the overlay heatmap as an image
+    plt.savefig(output_file)
+    print(f"Heatmap with overlay saved as {output_file}")
+    # Save the heatmap array
+    # np.save("heatmap_array.npy", heatmap_arr)
+    # print("Heatmap array saved as heatmap_array.npy")
+
+
 def main():
     clock = pygame.time.Clock()
-
     num_agents = 3
     state_dim = 5
     action_dim = 2  
@@ -246,8 +282,10 @@ def main():
         Coin(230, 400)
     )
 
-    total_episodes = 1000
+    total_episodes = 20
     max_timesteps = 5000
+    # Position log for heatmap
+    position_log = []
 
     for episode in range(total_episodes):
         ducks = [DuckRacer() for _ in range(num_agents)]
@@ -295,7 +333,7 @@ def main():
                     done = True
                     next_state = np.zeros_like(state, dtype=np.float32)
                 else:
-                    reward += 0.0001
+                    # reward += 0.0001
                     total_rewards[i] += reward
                     next_state = duck.data()
                     next_state = np.array(next_state, dtype=np.float32)
@@ -305,6 +343,9 @@ def main():
                 #     print(f"Duck: {i} Reward: {reward}")
                 agents[i].add_to_replay(state, action, reward, next_state, done)
                 agents[i].train(batch_size=256)
+
+                # Log the position for heatmap
+                position_log.append(duck.rect.center)
 
             episode_timesteps += 1
 
@@ -318,6 +359,7 @@ def main():
             pygame.display.update()
             clock.tick(FPS)
 
+    create_heatmap(position_log, SCREEN_WIDTH, SCREEN_HEIGHT)
     pygame.quit()
 
 if __name__ == "__main__":
