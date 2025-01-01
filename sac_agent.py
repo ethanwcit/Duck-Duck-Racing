@@ -12,14 +12,27 @@ class Actor(nn.Module):
         super(Actor, self).__init__()
         self.fc1 = nn.Linear(state_dim, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.fc3 = nn.Linear(256, action_dim)
+        self.mean = nn.Linear(256, action_dim)
+        self.log_std = nn.Linear(256, action_dim)
         self.max_action = max_action
 
     def forward(self, state):
         x = torch.relu(self.fc1(state))
         x = torch.relu(self.fc2(x))
-        return torch.tanh(self.fc3(x)) * self.max_action
+        mean = self.mean(x)
+        log_std = self.log_std(x).clamp(-20, 2)  # Bound log_std for stability
+        std = log_std.exp()
+        return mean, std
 
+    def sample(self, state):
+        mean, std = self.forward(state)
+        normal = torch.distributions.Normal(mean, std)  # Gauusian dist
+        action = normal.rsample()  
+        log_prob = normal.log_prob(action).sum(dim=1, keepdim=True)
+        action = torch.tanh(action) * self.max_action
+        log_prob -= torch.log(1 - action.pow(2) + 1e-6).sum(dim=1, keepdim=True)  # Correction for tanh
+        return action, log_prob
+    
 # Critic Network
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
@@ -54,7 +67,7 @@ class ReplayBuffer:
         )
 
 class SACAgent:
-    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=1e-3,alpha = 0.2):
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-3,alpha = 0.2):
         self.actor = Actor(state_dim, action_dim, max_action).cuda()
         self.actor_target = Actor(state_dim, action_dim, max_action).cuda()
         self.actor_target.load_state_dict(self.actor.state_dict())
@@ -79,9 +92,17 @@ class SACAgent:
         self.critic_loss = None
         self.actor_loss = None
 
-    def select_action(self, state):
-        state = torch.FloatTensor(state).unsqueeze(0).cuda()
-        return self.actor(state).cpu().data.numpy().flatten()
+    def select_action(self, state, deterministic=False):
+        state = torch.FloatTensor(state).unsqueeze(0).cuda()  
+        if deterministic:
+            with torch.no_grad():
+                mean, _ = self.actor(state)
+                action = torch.tanh(mean) * self.max_action  # Deterministic action
+        else:
+            with torch.no_grad():
+                action, _ = self.actor.sample(state)  # Stochastic action
+
+        return action.cpu().numpy().flatten() 
 
     def train(self, batch_size=64):
         if len(self.replay_buffer.buffer) < batch_size:
@@ -97,11 +118,11 @@ class SACAgent:
         # Train Critic
 
         with torch.no_grad():
-
-            next_actions = self.actor_target(next_states)
+            next_actions, next_log_probs = self.actor.sample(next_states)
             target_Q1 = self.critic1_target(next_states, next_actions)
             target_Q2 = self.critic2_target(next_states, next_actions)
-            target_Q = rewards + (1 - dones) * self.gamma * torch.min(target_Q1,target_Q2)
+            target_Q = rewards + (1 - dones) * self.gamma * (torch.min(target_Q1, target_Q2) 
+                                                             - self.alpha * next_log_probs)
 
 
         current_Q1 = self.critic1(states, actions)
@@ -119,14 +140,12 @@ class SACAgent:
         critic2_loss.backward()
         self.critic2_optimizer.step()
 
-        # Train Actor (to be fixed)
-        log_probs = torch.log(torch.abs(self.actor(states)) + 1e-6).sum(dim=1)
+        # Train Actor 
+        actions, log_probs = self.actor.sample(states)
         actor_loss = (self.alpha * log_probs - 
-              torch.min(self.critic1(states, self.actor(states)),
-                        self.critic2(states, self.actor(states)))).mean()
+                      torch.min(self.critic1(states, actions), 
+                                self.critic2(states, actions))).mean()
         
-        self.actor_loss = actor_loss.item()
-
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
