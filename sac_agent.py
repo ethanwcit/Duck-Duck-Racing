@@ -12,7 +12,7 @@ class Actor(nn.Module):
         super(Actor, self).__init__()
         self.fc1 = nn.Linear(state_dim, 256)
         self.fc2 = nn.Linear(256, 256)
-        self.mean = nn.Linear(256, action_dim)
+        self.mean = nn.Linear(256, action_dim)              # Gaussian mean and stdd as NNs
         self.log_std = nn.Linear(256, action_dim)
         self.max_action = max_action
 
@@ -20,17 +20,17 @@ class Actor(nn.Module):
         x = torch.relu(self.fc1(state))
         x = torch.relu(self.fc2(x))
         mean = self.mean(x)
-        log_std = self.log_std(x).clamp(-20, 2)  # Bound log_std for stability
+        log_std = self.log_std(x).clamp(-20, 2)  # Bound for stability
         std = log_std.exp()
         return mean, std
 
     def sample(self, state):
         mean, std = self.forward(state)
-        normal = torch.distributions.Normal(mean, std)  # Gauusian dist
-        action = normal.rsample()  
+        normal = torch.distributions.Normal(mean, std)  # Normal dist
+        action = normal.rsample()                       # Reparameterisation
         log_prob = normal.log_prob(action).sum(dim=1, keepdim=True)
-        action = torch.tanh(action) * self.max_action
-        log_prob -= torch.log(1 - action.pow(2) + 1e-6).sum(dim=1, keepdim=True)  # Correction for tanh
+        action = torch.tanh(action) * self.max_action                               # Tanh ensures vals in [-1,1], then scale for env
+        log_prob -= torch.log(1 - action.pow(2) + 1e-6).sum(dim=1, keepdim=True)    # Correction for tanh
         return action, log_prob
     
 # Critic Network
@@ -67,7 +67,7 @@ class ReplayBuffer:
         )
 
 class SACAgent:
-    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-3,alpha = 0.2):
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-3,alpha = 0.15):
         self.actor = Actor(state_dim, action_dim, max_action).cuda()
         self.actor_target = Actor(state_dim, action_dim, max_action).cuda()
         self.actor_target.load_state_dict(self.actor.state_dict())
@@ -92,15 +92,11 @@ class SACAgent:
         self.critic_loss = None
         self.actor_loss = None
 
-    def select_action(self, state, deterministic=False):
+    def select_action(self, state):
         state = torch.FloatTensor(state).unsqueeze(0).cuda()  
-        if deterministic:
-            with torch.no_grad():
-                mean, _ = self.actor(state)
-                action = torch.tanh(mean) * self.max_action  # Deterministic action
-        else:
-            with torch.no_grad():
-                action, _ = self.actor.sample(state)  # Stochastic action
+
+        with torch.no_grad():
+            action, _ = self.actor.sample(state)  # Stochastic action
 
         return action.cpu().numpy().flatten() 
 
@@ -121,6 +117,7 @@ class SACAgent:
             next_actions, next_log_probs = self.actor.sample(next_states)
             target_Q1 = self.critic1_target(next_states, next_actions)
             target_Q2 = self.critic2_target(next_states, next_actions)
+            
             target_Q = rewards + (1 - dones) * self.gamma * (torch.min(target_Q1, target_Q2) 
                                                              - self.alpha * next_log_probs)
 
@@ -140,8 +137,9 @@ class SACAgent:
         critic2_loss.backward()
         self.critic2_optimizer.step()
 
-        # Train Actor 
+        # Train Actor (entropy maximisation)
         actions, log_probs = self.actor.sample(states)
+
         actor_loss = (self.alpha * log_probs - 
                       torch.min(self.critic1(states, actions), 
                                 self.critic2(states, actions))).mean()
@@ -157,8 +155,7 @@ class SACAgent:
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
         for param, target_param in zip(self.critic2.parameters(), self.critic2_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-        for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
-            target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+
 
     def save_model(self, directory):
 
@@ -191,17 +188,12 @@ class SACAgent:
 
         print(f"Model loaded from {directory}")
 
-    def predict(self,state,deterministic = True):
+    def predict(self,state):
 
         state_tensor = torch.FloatTensor(state).unsqueeze(0).cuda()
 
-        if deterministic:
 
-            with torch.no_grad():
-                action = self.actor(state_tensor)[0] 
-        else:
-
-            with torch.no_grad():
-                action, _ = self.actor.sample(state_tensor) 
+        with torch.no_grad():
+            action, _ = self.actor.sample(state_tensor) 
 
         return action.cpu().numpy().flatten()
