@@ -5,20 +5,24 @@ import math
 from ddpg_agent import DDPGAgent
 from td3_agent import TD3Agent
 import matplotlib.pyplot as plt
+from moviepy import ImageSequenceClip
 import matplotlib.image as mpimg
 from scipy.ndimage import gaussian_filter
-CHECKPOINT_REWARD = 600  # Reward for crossing a checkpoint
-LAP_REWARD = 900  # Reward for completing a lap
-COIN_REWARD = 400 # Reward for collecting a coin
+import shutil
+CHECKPOINT_REWARD = 6  # Reward for crossing a checkpoint
+LAP_REWARD = 60  # Reward for completing a lap
+COIN_REWARD = 4 # Reward for collecting a coin
 SCREEN_WIDTH = 1244
 SCREEN_HEIGHT = 1016
 FPS = 60
 pygame.init()
 pygame.display.set_caption('Duck Duck: RACING')
 SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+track_path = "lake.png"
 ICON = pygame.image.load(os.path.join("Assets", "ddpg.png"))
 pygame.display.set_icon(ICON)
-TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
+# TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
+TRACK = pygame.image.load(os.path.join("Assets", track_path))
 
 # Change based on agent used
 DUCK = "td3.png"
@@ -60,17 +64,22 @@ class DuckRacer(pygame.sprite.Sprite):
         self.lap_progress = 0  # Track progress around the lap
         self.total_laps = 0  # Total laps to complete
         self.checkpoints = [ # Checkpoints coordinates
-            (570, 780, 5, 160),
-            (900, 750, 5, 160),
-            (900, 110, 5, 160),
-            (140, 500, 160, 5)   
+            (570, 800, 5, 140),
+            (900, 760, 5, 150),
+            (900, 115, 5, 150),
+            (150, 500, 150, 5)   
         ]
+        # self.checkpoints = [ # Checkpoints coordinates
+        #     (625, 780, 5, 150),
+        #     (625, 68, 5, 150)
+        # ]
         self.last_checkpoint_i = -1
         self.next_checkpoint_i = 1
         self.coins_collected_in_lap = set()  # Set to store indices of collected coins
         self.lap_start_time = self.start_new_lap()  # Time when the lap started
         self.radar_min = 0
         self.radar_max = 200
+        self.lap_times = []
 
     def update_lap_progress(self):
         """
@@ -88,7 +97,7 @@ class DuckRacer(pygame.sprite.Sprite):
             self.last_checkpoint_i = self.next_checkpoint_i
             self.next_checkpoint_i = (self.next_checkpoint_i + 1) % len(self.checkpoints)
             self.lap_progress += 1
-            print(f"Lap progress: {self.lap_progress}/3 , Next checkpoint: {self.next_checkpoint_i}")
+            print(f"Lap progress: {self.lap_progress}/{len(self.checkpoints)} , Next checkpoint: {self.next_checkpoint_i}")
             # Check if lap is completed
             if self.lap_progress == len(self.checkpoints):
                 self.total_laps += 1
@@ -96,7 +105,8 @@ class DuckRacer(pygame.sprite.Sprite):
                 self.last_checkpoint_i = -1
                 # Calculate lap time if lap is completed
                 lap_time = pygame.time.get_ticks() - self.lap_start_time
-                reward = LAP_REWARD + max(0, 1000 * (0.99 ** (lap_time // 100)))  # Exponential decay function for reward
+                self.lap_times.append(round(lap_time / 1000, 2))
+                reward = LAP_REWARD + max(0, 1000 * (0.99 ** (lap_time // 50)))  # Exponential decay function for reward
                 print(f"Lap completed in {lap_time / 1000:.2f} seconds. Reward: {reward}")
                 self.start_new_lap()  # Start a new lap and track the time
                 return reward
@@ -104,6 +114,11 @@ class DuckRacer(pygame.sprite.Sprite):
             return CHECKPOINT_REWARD if self.lap_progress != 0 else 0
 
         return 0
+    
+    def get_lap_times(self):
+        times = self.lap_times
+        self.lap_progress = [] # Clear the lap times
+        return times
 
     def start_new_lap(self):
         """Start a new lap and record the start time."""
@@ -132,11 +147,10 @@ class DuckRacer(pygame.sprite.Sprite):
                 reward += COIN_REWARD
         return reward
 
-
     def update(self):
         self.radars.clear()
-        self.rotate()
-        self.drive()
+        self.rotate_drive()
+        # self.drive()
         for radar_angle in (-60, -30, 0, 30, 60):
             self.radar(radar_angle)
         self.collision()
@@ -145,6 +159,7 @@ class DuckRacer(pygame.sprite.Sprite):
         self.current_velocity += (self.target_velocity - self.current_velocity) * self.smoothing_factor
         self.vel_vector = self.vel_vector.normalize() * self.current_velocity  # Apply smoothed velocity
         self.rect.center += self.vel_vector
+
     def collision(self):
         length = 40
         collision_point_right = [int(self.rect.center[0] + math.cos(math.radians(self.angle + 18)) * length),
@@ -159,9 +174,11 @@ class DuckRacer(pygame.sprite.Sprite):
         pygame.draw.circle(SCREEN, (0, 255, 255, 0), collision_point_right, 4)
         pygame.draw.circle(SCREEN, (0, 255, 255, 0), collision_point_left, 4)
 
-    def rotate(self):
+    def rotate_drive(self):
         self.direction = (1 - self.filter_alpha) * self.direction + self.filter_alpha * self.target_direction
-
+        self.current_velocity += (self.target_velocity - self.current_velocity) * self.smoothing_factor
+        self.vel_vector = self.vel_vector.normalize() * self.current_velocity  # Apply smoothed velocity
+        
         if abs(self.direction - self.target_direction) < 0.05:
             self.direction = self.target_direction
 
@@ -173,6 +190,7 @@ class DuckRacer(pygame.sprite.Sprite):
             self.vel_vector.rotate_ip(-self.rotation_vel)
 
         self.image = pygame.transform.rotozoom(self.original_image, self.angle, 0.1)
+        self.rect.center += self.vel_vector
         self.rect = self.image.get_rect(center=self.rect.center)
 
     def radar(self, radar_angle):
@@ -199,6 +217,56 @@ class DuckRacer(pygame.sprite.Sprite):
             input[i] = int(radar[1])
         normalized_data = [(x - self.radar_min) / (self.radar_max - self.radar_min) for x in input]
         return normalized_data
+    
+def plot_graphs(total_episodes, rewards_per_episode, lap_times_per_episode, actor_losses, critic_losses, q_values, folder = "metrics",agent_name = "td3", map = "lake"):
+    path = os.path.join(os.path.join(folder,agent_name), map)
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, total_episodes + 1), rewards_per_episode, label="Total Rewards")
+    plt.xlabel("Episode")
+    plt.ylabel("Total Reward")
+    plt.title("Training Rewards Per Episode")
+    plt.legend()
+    plt.savefig(os.path.join(path,f"{agent_name}_{map}_rewards_plot.png"))
+    print("Rewards plot saved as rewards_plot.png")
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, total_episodes + 1), lap_times_per_episode, label="Average Lap Time")
+    plt.xlabel("Episode")
+    plt.ylabel("Lap Time (ms)")
+    plt.title("Lap Time Per Episode")
+    plt.legend()
+    plt.savefig(os.path.join(path,f"{agent_name}_{map}_lap_times_plot.png"))
+    print("Lap times plot saved as lap_times_plot.png")
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, total_episodes + 1), critic_losses, label="Critic Loss")
+    plt.xlabel("Episode")
+    plt.ylabel("Loss")
+    plt.title("Critic Loss Per Episode")
+    plt.legend()
+    plt.savefig(os.path.join(path,f"{agent_name}_{map}_losses_critic_plot.png"))
+    print("Losses plot saved as losses_critic_plot.png")
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, total_episodes + 1), actor_losses, label="Actor Loss")
+    plt.xlabel("Episode")
+    plt.ylabel("Loss")
+    plt.title("Actor Loss Per Episode")
+    plt.legend()
+    plt.savefig(os.path.join(path,f"{agent_name}_{map}_losses_actor_plot.png"))
+    print("Losses plot saved as losses_actor_plot.png")
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(range(1, total_episodes + 1), q_values, label="Average Q-Value")
+    plt.xlabel("Episode")
+    plt.ylabel("Q-Value")
+    plt.title("Average Q-Value Per Episode")
+    plt.legend()
+    plt.savefig(os.path.join(path,f"{agent_name}_{map}_q_values_plot.png"))
+    print("Q-values plot saved as q_values_plot.png")
 
 def cal_checkpoint_reward(duck):
     next_checkpoint = duck.checkpoints[duck.next_checkpoint_i]
@@ -215,7 +283,7 @@ def cal_checkpoint_reward(duck):
     dot_product = duck.vel_vector.dot(checkpoint_vector.normalize())
 
     # Reward based on both distance and movement direction
-    const =  0.5  # Constant for scaling
+    const =  0.2  # Constant for scaling
     epsilon = 0.001  # Small epsilon to avoid division by zero
 
     # Reward for distance: inversely proportional to distance (closer = higher reward)
@@ -228,11 +296,15 @@ def cal_checkpoint_reward(duck):
 
     # If moving away from the checkpoint, penalize more
     if dot_product < 0:
-        reward = dot_product * 20  # Strong negative reward for moving away
+        reward = dot_product * 2  # Strong negative reward for moving away
     # print(f"Dot product: {dot_product}, Distance to checkpoint: {distance_to_checkpoint}, Next checkpoint: {next_checkpoint}")
+    # print(f"reward product: {reward}")
     return reward
 
-def create_heatmap(save_pos, screen_w, screen_h, track = "Assets\lake.png",output_file="heatmap.png"):
+def create_heatmap(save_pos, screen_w, screen_h, track = os.path.join("Assets", track_path),output_file="heatmap.png", folder = "metrics", agent_name = "td3", map = "lake" ):
+    path = os.path.join(os.path.join(folder,agent_name), map)
+    if not os.path.exists(path):
+        os.makedirs(path)
     # Initialize a 2D array to count the frequency of positions
     heatmap_arr = np.zeros((screen_h, screen_w))
 
@@ -253,26 +325,44 @@ def create_heatmap(save_pos, screen_w, screen_h, track = "Assets\lake.png",outpu
     plt.figure(figsize=(10, 8))
     plt.imshow(env_map_resized, extent=[0, screen_w, 0, screen_h], alpha=0.7)
     plt.imshow(smoothed_heatmap, cmap='hot', extent=[0, screen_w, 0, screen_h], alpha=0.77)
-    plt.colorbar(label="Frequency")
+    plt.colorbar(label="Log-Scaled Frequency")
     plt.title("Agent Position Heatmap with Environment Map Overlay")
     plt.xlabel("X Position")
     plt.ylabel("Y Position")
 
     # Save the overlay heatmap as an image
-    plt.savefig(output_file)
+    plt.savefig(os.path.join(path,f"{agent_name}_{map}_heatmap.png"))
     print(f"Heatmap with overlay saved as {output_file}")
     # Save the heatmap array
     # np.save("heatmap_array.npy", heatmap_arr)
     # print("Heatmap array saved as heatmap_array.npy")
 
+def save_frame(surface, frame_number, folder="frames"):
+    pygame.image.save(surface, os.path.join(folder, f"frame_{frame_number:04d}.png"))
+
+def create_training_gif(folder="frames", output_filename="training_process.gif", fps=120, folder_save = "metrics", agent_name = "td3", map = "lake"):
+    path = os.path.join(os.path.join(folder_save,agent_name), map)
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    frames = sorted([os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".png")])
+    if frames:
+        clip = ImageSequenceClip(frames, fps=fps)
+        clip.write_gif(os.path.join(path,f"{agent_name}_{map}_{output_filename}"))
+        print(f"GIF saved as {output_filename}") 
+        shutil.rmtree(folder)  # Clean up the frames folder   
+
+def display_episode_number(screen, episode, font):
+    text = font.render(f"Episode: {episode}", True, (255, 255, 255))
+    screen.blit(text, (10, 10))
 
 def main():
+
     clock = pygame.time.Clock()
-    num_agents = 3
+    num_agents = 1
     state_dim = 5
     action_dim = 2  
     max_action = 1
-
     agents = [TD3Agent(state_dim, action_dim, max_action) for _ in range(num_agents)]
 
     coins = pygame.sprite.Group(
@@ -281,18 +371,42 @@ def main():
         Coin(800, 850),
         Coin(230, 400)
     )
+    # coins = None
 
-    total_episodes = 20
-    max_timesteps = 5000
+    total_episodes = 100
+    max_timesteps = 2500
     # Position log for heatmap
     position_log = []
+    # Metrics for graph plotting
+    rewards_per_episode = []
+    lap_times_per_episode = []
+    actor_losses = []
+    critic_losses = []
+    q_values = []
+    fastest_time = 10000
+    frame_count = 0
+    pygame.font.init()
+    font = pygame.font.Font(None, 36)  # Initialize font for displaying episode numbers
+
+    folder = "frames" # create folder to store gif frames
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    else:
+        shutil.rmtree(folder)  # Clean up the frames folder   
+        os.makedirs(folder)
 
     for episode in range(total_episodes):
         ducks = [DuckRacer() for _ in range(num_agents)]
         duck_groups = pygame.sprite.Group(*ducks)
         total_rewards = [0] * num_agents
         episode_timesteps = 0
+        lap_times = []  # Store lap times for this episode
         paused = False
+        episode_actor_loss = 0
+        episode_critic_loss = 0
+        episode_q_value = 0
+        episode_updates = 0
+
 
         while not paused:
             for event in pygame.event.get():
@@ -304,7 +418,9 @@ def main():
                         coins.sprites()[coin_index].reset_color()
 
             SCREEN.blit(TRACK, (0, 0))
-            coins.draw(SCREEN)
+            if coins:
+                coins.draw(SCREEN)
+            display_episode_number(SCREEN, episode + 1, font)  # Display the current episode number
             for i, checkpoint in enumerate(ducks[0].checkpoints):
                 pygame.draw.rect(SCREEN, (80, 90, 145), checkpoint)
 
@@ -315,19 +431,22 @@ def main():
                 state = duck.data()
                 state = np.array(state, dtype=np.float32)
 
-                exploration_noise = 0.4
+                exploration_noise = 0.393
+                if episode > 20:
+                    exploration_noise = 0.393
                 action = agents[i].select_action(state, exploration_noise)
 
                 duck.target_direction = 1 if action[0] > 0.5 else -1 if action[0] < -0.5 else 0
-                duck.target_velocity = max(2, min(10, action[1]*7))
+                duck.target_velocity = max(2, min(10, action[1]*7)) #minimum velocity is 2, max is 10
 
                 reward = cal_checkpoint_reward(duck)
                 # print(f"Reward: {reward}")
 
                 duck.update()
                 reward += duck.update_lap_progress()
-                reward += duck.check_coin_collision(coins)
-                agents[i].update_noise(episode)
+                if coins:
+                    reward += duck.check_coin_collision(coins)
+                # agents[i].update_noise(episode)
                 if not duck.alive:
                     reward = -1000
                     done = True
@@ -342,7 +461,13 @@ def main():
                 # if reward != 0:
                 #     print(f"Duck: {i} Reward: {reward}")
                 agents[i].add_to_replay(state, action, reward, next_state, done)
-                agents[i].train(batch_size=256)
+                loss, q_value = agents[i].train(batch_size=64)
+                if loss['actor'] is not None:
+                    episode_actor_loss += loss['actor']
+                episode_critic_loss += loss['critic']
+                episode_q_value += q_value
+                episode_updates += 1
+                # agents[i].train(batch_size=54)
 
                 # Log the position for heatmap
                 position_log.append(duck.rect.center)
@@ -354,13 +479,47 @@ def main():
                 for j, reward in enumerate(total_rewards):
                     print(f"Duck {j + 1}: Total reward = {reward}")
                 break
-
+            
             duck_groups.draw(SCREEN)
             pygame.display.update()
+            # Save the current frame
+            if (episode_timesteps -1) % 25==0:
+                save_frame(SCREEN, frame_count)
+                frame_count += 1
             clock.tick(FPS)
-
-    create_heatmap(position_log, SCREEN_WIDTH, SCREEN_HEIGHT)
+        rewards_per_episode.append(sum(total_rewards))
+        for i in range(len(ducks)):
+            duck_times = ducks[i].get_lap_times()
+            for j in duck_times:
+                if j < fastest_time:
+                    fastest_time = j
+            if len(duck_times) > 0:
+                lap_times.extend(duck_times)
+        if lap_times:
+            lap_times_per_episode.append(sum(lap_times) / len(lap_times))
+        else:
+            lap_times_per_episode.append(None)
+        actor_losses.append(episode_actor_loss / max(episode_updates, 1))
+        critic_losses.append(episode_critic_loss / max(episode_updates, 1))
+        q_values.append(episode_q_value / max(episode_updates, 1))
+    duck_name = DUCK.removesuffix(".png")
+    map_name = track_path.removesuffix(".png")
+    agents[0].save(f"{duck_name}_{map_name}")
+    if len(lap_times_per_episode) > 0:
+        total = 0
+        count = 0
+        for i in range(len(lap_times_per_episode)):
+            if lap_times_per_episode[i] is not None:
+                total += lap_times_per_episode[i]
+                count += 1
+        print(f"average reward: {sum(rewards_per_episode)/total_episodes}")
+        print(f"average lap time: {total/count}")
+        print(f"Fastest time: {fastest_time}")
+    create_heatmap(position_log, SCREEN_WIDTH, SCREEN_HEIGHT, agent_name = duck_name, map = map_name)
+    plot_graphs(total_episodes, rewards_per_episode, lap_times_per_episode, actor_losses, critic_losses, q_values, agent_name = duck_name, map = map_name)
+    create_training_gif(folder="frames", output_filename="training_process.gif", fps=60, agent_name = duck_name, map = map_name)
     pygame.quit()
 
 if __name__ == "__main__":
+    # create_training_gif(folder="frames", output_filename="training_process.gif", fps=60, agent_name = "td3", map = "lake_circle")
     main()

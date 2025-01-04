@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 from collections import deque
-
+import os
 # Actor Network
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_action):
@@ -85,13 +85,13 @@ class OUNoise:
 
 # DDPG Agent
 class TD3Agent:
-    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-4, policy_noise=0.4 , noise_clip=1.0, policy_delay=2):
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.9759, tau=0.00864, lr=3e-4, policy_noise=0.393 , noise_clip=1.4493, policy_delay=2):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=3e-3)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=0.00074661)
 
         self.critic1 = Critic(state_dim, action_dim).to(self.device)
         self.critic2 = Critic(state_dim, action_dim).to(self.device)
@@ -101,8 +101,8 @@ class TD3Agent:
         self.critic1_target.load_state_dict(self.critic1.state_dict())
         self.critic2_target.load_state_dict(self.critic2.state_dict())
 
-        self.critic_optimizer1 = optim.Adam(self.critic1.parameters(), lr=5e-2)
-        self.critic_optimizer2 = optim.Adam(self.critic2.parameters(), lr=5e-2)
+        self.critic_optimizer1 = optim.Adam(self.critic1.parameters(), lr=0.00074661)
+        self.critic_optimizer2 = optim.Adam(self.critic2.parameters(), lr=0.00074661)
 
         self.noise = OUNoise(action_dim)
         self.action_dim = action_dim
@@ -167,10 +167,18 @@ class TD3Agent:
         # print(next_actions.shape, next_actions)
         return next_actions
 
-        
+    def update_target_nets(self):
+        for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+                target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        for param, target_param in zip(self.critic1.parameters(), self.critic1_target.parameters()):
+            target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        for param, target_param in zip(self.critic2.parameters(), self.critic2_target.parameters()):
+            target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
     def train(self, batch_size=64):
         if len(self.replay_buffer.buffer) < batch_size:
-                    return
+            return {'actor': 0.0, 'critic': 0.0}, 0.0  # Return default values if there's insufficient data.
+
+        # Sample a batch of transitions
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
         states = torch.FloatTensor(states).to(self.device)
         actions = torch.FloatTensor(actions).to(self.device)
@@ -178,16 +186,13 @@ class TD3Agent:
         next_states = torch.FloatTensor(next_states).to(self.device)
         dones = torch.FloatTensor(dones).unsqueeze(1).to(self.device)
 
-        # Add noise to actions for target policy smoothing
+        # Compute target Q values
         next_actions = self.apply_policy_noise(next_states)
-        # print(f"State shape: {next_states.shape}, Actions shape: {next_actions.shape}")
-        # Compute target Q-values
         target_Q1 = self.critic1_target(next_states, next_actions)
         target_Q2 = self.critic2_target(next_states, next_actions)
-        target_Q = torch.min(target_Q1, target_Q2)
-        target_Q = rewards + (1 - dones) * self.gamma * target_Q.detach()
+        target_Q = rewards + (1 - dones) * self.gamma * torch.min(target_Q1, target_Q2).detach()
 
-        # Update Critic networks
+        # Update critic networks
         current_Q1 = self.critic1(states, actions)
         current_Q2 = self.critic2(states, actions)
         critic_loss1 = nn.MSELoss()(current_Q1, target_Q)
@@ -201,20 +206,34 @@ class TD3Agent:
         critic_loss2.backward()
         self.critic_optimizer2.step()
 
-        # Delayed policy updates
+        # Delayed actor updates
+        actor_loss_val = None
         if self.count % self.policy_delay == 0:
-            # Update Actor network
             actor_loss = -self.critic1(states, self.actor(states)).mean()
             self.actor_optimizer.zero_grad()
             actor_loss.backward()
             self.actor_optimizer.step()
-
+            
             # Update target networks
-            for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
-                target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-            for param, target_param in zip(self.critic1.parameters(), self.critic1_target.parameters()):
-                target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-            for param, target_param in zip(self.critic2.parameters(), self.critic2_target.parameters()):
-                target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-
+            self.update_target_nets()
+            actor_loss_val = actor_loss.item()
         self.count += 1
+        actor_loss = actor_loss_val
+        # print(actor_loss)
+        # Return metrics
+        avg_q_value = (current_Q1.mean().item() +  current_Q1.mean().item())/2  # Compute the average Q-value
+        return {'actor': actor_loss, 'critic': (critic_loss1.item() + critic_loss2.item()) / 2}, avg_q_value
+
+
+    def save(self, filename, folder="saved_agents"):
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        torch.save({
+            'actor_state_dict': self.actor.state_dict(),
+            'critic1_state_dict': self.critic1.state_dict(),
+            'critic2_state_dict': self.critic2.state_dict(),
+            'actor_optimizer_state_dict': self.actor_optimizer.state_dict(),
+            'critic_optimizer1_state_dict': self.critic_optimizer1.state_dict(),
+            'critic_optimizer2_state_dict': self.critic_optimizer2.state_dict()
+        }, os.path.join(folder, filename))
+        print(f"Agent's state saved to {filename}.")
