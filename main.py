@@ -19,13 +19,13 @@ SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
 
 #####
-AGENT = "DDPGAgent"
+AGENT = "SACAgent"
 #####
 
 
 pygame.init()
 pygame.display.set_caption('Duck Duck: RACING')
-ICON = pygame.image.load(os.path.join("Assets", "ddpg.png"))
+ICON = pygame.image.load(os.path.join("Assets", "sac.png"))
 pygame.display.set_icon(ICON)
 TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
 
@@ -51,7 +51,7 @@ class Coin(pygame.sprite.Sprite):
 class DuckRacer(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
-        self.original_image = pygame.image.load(os.path.join("Assets", "ddpg.png"))
+        self.original_image = pygame.image.load(os.path.join("Assets", "sac.png"))
         self.image = self.original_image
         self.rect = self.image.get_rect(center=(490, 820))
         self.vel_vector = pygame.math.Vector2(1, 0)
@@ -262,7 +262,7 @@ def run_training(agents, num_episodes, max_timesteps):
     """Helper function to run training episodes and return rewards"""
     pygame.init()
     SCREEN = pygame.display.set_mode((1244, 1016))
-    TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
+    TRACK = pygame.image.load(os.path.join("Assets", "lake_duck.png"))
     
     all_episode_rewards = []
     num_agents = len(agents)
@@ -356,6 +356,27 @@ def objective_sac(trial):
     rewards = run_training(agents, num_episodes=100, max_timesteps=5000)
     return np.mean(rewards)
 
+def objective_td3(trial):
+    # Hyperparameter search space
+    gamma = trial.suggest_float("gamma", 0.95, 0.999)
+    tau = trial.suggest_float("tau", 0.001, 0.01)
+    lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
+    policy_noise = trial.suggest_float("policy_noise", 0.0, 0.5)
+    noise_clip =  trial.suggest_float("noise_clip", 1.0, 2.0)
+    policy_delay = trial.suggest_int("policy_delay", 1, 4)
+
+    # Initialize agents with trial hyperparameters
+    num_agents = 1
+    state_dim = 5
+    action_dim = 2
+    max_action = 1
+    
+    agents = [TD3Agent(state_dim, action_dim, max_action
+                      ) for _ in range(num_agents)]
+    
+    rewards = run_training(agents, num_episodes=100, max_timesteps=5000)
+    return np.mean(rewards)
+
 def objective_ddpg(trial):
     # Hyperparameter search space
     gamma = trial.suggest_float("gamma", 0.95, 0.999)
@@ -380,7 +401,7 @@ def main_with_hyperparameter_optimisation():
     # Create study and run optimization
     study = optuna.create_study(direction="maximize")
     # SET THE AGENT TO OPTIMISE HERE
-    study.optimize(objective_ddpg, n_trials=20)
+    study.optimize(objective_td3, n_trials=20)
     
     # Prepare results for all trials
     optimization_results = []
