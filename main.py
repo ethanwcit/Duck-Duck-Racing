@@ -11,9 +11,9 @@ import matplotlib.image as mpimg
 from scipy.ndimage import gaussian_filter
 import shutil
 import csv
-CHECKPOINT_REWARD = 6  # Reward for crossing a checkpoint
-LAP_REWARD = 60  # Reward for completing a lap
-COIN_REWARD = 4 # Reward for collecting a coin
+CHECKPOINT_REWARD = 600  # Reward for crossing a checkpoint
+LAP_REWARD = 900  # Reward for completing a lap
+COIN_REWARD = 400 # Reward for collecting a coin
 SCREEN_WIDTH = 1244
 SCREEN_HEIGHT = 1016
 FPS = 60
@@ -92,7 +92,7 @@ class DuckRacer(pygame.sprite.Sprite):
             self.last_checkpoint_i = self.next_checkpoint_i
             self.next_checkpoint_i = (self.next_checkpoint_i + 1) % len(self.checkpoints)
             self.lap_progress += 1
-            print(f"Lap progress: {self.lap_progress}/{len(self.checkpoints)} , Next checkpoint: {self.next_checkpoint_i}")
+            # print(f"Lap progress: {self.lap_progress}/{len(self.checkpoints)} , Next checkpoint: {self.next_checkpoint_i}")
             # Check if lap is completed
             if self.lap_progress == len(self.checkpoints):
                 self.total_laps += 1
@@ -101,7 +101,8 @@ class DuckRacer(pygame.sprite.Sprite):
                 # Calculate lap time if lap is completed
                 lap_time = pygame.time.get_ticks() - self.lap_start_time
                 self.lap_times.append(round(lap_time / 1000, 2))
-                reward = LAP_REWARD + max(0, 1000 * (0.99 ** (lap_time // 50)))  # Exponential decay function for reward
+                # reward = LAP_REWARD + max(0, 1000 * (0.99 ** (lap_time // 50)))  # Exponential decay function for reward
+                reward = LAP_REWARD + max(0, 1000 * (0.99 ** (lap_time // 100)))  # Exponential decay function for reward
                 print(f"Lap completed in {lap_time / 1000:.2f} seconds. Reward: {reward}")
                 self.start_new_lap()  # Start a new lap and track the time
                 return reward
@@ -141,11 +142,10 @@ class DuckRacer(pygame.sprite.Sprite):
                 self.coins_collected_in_lap.add(index)  # Add coin index to the set
                 reward += COIN_REWARD
         return reward
-
     def update(self):
         self.radars.clear()
-        self.rotate_drive()
-        # self.drive()
+        self.rotate()
+        self.drive()
         for radar_angle in (-60, -30, 0, 30, 60):
             self.radar(radar_angle)
         self.collision()
@@ -154,6 +154,22 @@ class DuckRacer(pygame.sprite.Sprite):
         self.current_velocity += (self.target_velocity - self.current_velocity) * self.smoothing_factor
         self.vel_vector = self.vel_vector.normalize() * self.current_velocity  # Apply smoothed velocity
         self.rect.center += self.vel_vector
+    
+    def rotate(self):
+        self.direction = (1 - self.filter_alpha) * self.direction + self.filter_alpha * self.target_direction
+
+        if abs(self.direction - self.target_direction) < 0.05:
+            self.direction = self.target_direction
+
+        if self.direction == 1:
+            self.angle -= self.rotation_vel
+            self.vel_vector.rotate_ip(self.rotation_vel)
+        if self.direction == -1:
+            self.angle += self.rotation_vel
+            self.vel_vector.rotate_ip(-self.rotation_vel)
+
+        self.image = pygame.transform.rotozoom(self.original_image, self.angle, 0.1)
+        self.rect = self.image.get_rect(center=self.rect.center)
 
     def collision(self):
         length = 40
@@ -280,31 +296,23 @@ def cal_checkpoint_reward(duck):
         next_checkpoint[0] + next_checkpoint[2] / 2,  # Center X
         next_checkpoint[1] + next_checkpoint[3] / 2   # Center Y
     )
-
     # Vector from the duck to the checkpoint
     checkpoint_vector = pygame.math.Vector2(checkpoint_center) - pygame.math.Vector2(duck.rect.center)
     distance_to_checkpoint = checkpoint_vector.length()  # The distance to the checkpoint
-
     # Dot product to determine if we are moving towards or away from the checkpoint
     dot_product = duck.vel_vector.dot(checkpoint_vector.normalize())
-
     # Reward based on both distance and movement direction
-    const =  0.2  # Constant for scaling
+    const =  0.5  # Constant for scaling
     epsilon = 0.001  # Small epsilon to avoid division by zero
-
     # Reward for distance: inversely proportional to distance (closer = higher reward)
     reward_distance = const / (distance_to_checkpoint + epsilon)
-
     # Reward for direction: proportional to the dot product (moving towards the checkpoint = higher reward)
     reward_direction = dot_product * const
     # Combine both rewards
     reward = reward_distance + reward_direction
-
     # If moving away from the checkpoint, penalize more
     if dot_product < 0:
-        reward = dot_product * 2  # Strong negative reward for moving away
-    # print(f"Dot product: {dot_product}, Distance to checkpoint: {distance_to_checkpoint}, Next checkpoint: {next_checkpoint}")
-    # print(f"reward product: {reward}")
+        reward = dot_product * 20  # Strong negative reward for moving away
     return reward
 
 def create_heatmap(save_pos, screen_w, screen_h, track ,output_file="heatmap.png", folder = "metrics", agent_name = "td3", map = "lake" ):
@@ -366,9 +374,9 @@ def main():
     # Define the different maps and agents
     # maps = ["lake_circle.png", "lake.png", "lake_duck.png"]  # Add your map file names here
     # agents = ["td3.png", "ddpg.png", "sac.png"]  # Add your agent names here
-    maps = ["lake_circle.png"]  # Add your map file names here
-    agents_paths = ["ddpg.png"]  # Add your agent names here
-    num_iterations = 5  # Number of training iterations
+    maps = ["lake.png"]  # Add your map file names here
+    agents_paths = ["td3.png"]  # Add your agent names here
+    num_iterations = 1  # Number of training iterations
     base_output_folder = "metrics"
     metrics_file = os.path.join(base_output_folder, "iteration_metrics.csv")
     # Initialize the CSV file
@@ -419,7 +427,7 @@ def main():
                         Coin(230, 400)
                     )
                 total_episodes = 100
-                max_timesteps = 2500
+                max_timesteps = 1500
                 position_log = []
                 rewards_per_episode = []
                 lap_times_per_episode = []
@@ -463,7 +471,7 @@ def main():
                         SCREEN.blit(TRACK, (0, 0))
                         if coins:
                             coins.draw(SCREEN)
-                        display_episode_number(SCREEN, episode + 1, font)  # Display the current episode number
+                        # display_episode_number(SCREEN, episode + 1, font)  # Display the current episode number
                         for i, checkpoint in enumerate(ducks[0].checkpoints):
                             pygame.draw.rect(SCREEN, (80, 90, 145), checkpoint)
 
@@ -476,8 +484,8 @@ def main():
 
                             if agent_name == "td3":
                                 exploration_noise = 0.393
-                                if episode > 20:
-                                    exploration_noise = 0.07
+                                # if episode > 20:
+                                #     exploration_noise = 0.09
                                 action = agents[i].select_action(state, exploration_noise)
                             else:
                                 action = agents[i].select_action(state)
@@ -529,9 +537,9 @@ def main():
                         duck_groups.draw(SCREEN)
                         pygame.display.update()
                         # Save the current frame
-                        if (episode_timesteps -1) % 25==0:
-                            # save_frame(SCREEN, frame_count, folder = os.path.join(iteration_folder, "frames"))
-                            frame_count += 1
+                        # if (episode_timesteps -1) % 25==0:
+                        #     # save_frame(SCREEN, frame_count, folder = os.path.join(iteration_folder, "frames"))
+                        #     frame_count += 1
                         clock.tick(FPS)
                     rewards_per_episode.append(sum(total_rewards))
                     for i in range(len(ducks)):
@@ -539,6 +547,7 @@ def main():
                         for j in duck_times:
                             if j < fastest_time:
                                 fastest_time = j
+                                agents[0].save(f"{agent_name}_{map_name}_fastest_time_state:{fastest_time}",folder = iteration_folder)
                         if len(duck_times) > 0:
                             lap_times.extend(duck_times)
                     if lap_times:
@@ -549,7 +558,7 @@ def main():
                     critic_losses.append(episode_critic_loss / max(episode_updates, 1))
                     q_values.append(episode_q_value / max(episode_updates, 1))
 
-                agents[0].save(f"{agent_name}_{map_name}",folder = iteration_folder)
+                agents[0].save(f"{agent_name}_{map_name}_final_state",folder = iteration_folder)
                 if len(lap_times_per_episode) > 0:
                     total = 0
                     count = 0
@@ -562,14 +571,14 @@ def main():
                         avg_lap_time = None
                     else:
                         avg_lap_time = total / count
-                    print(f"Iteration {iteration}: average reward = {avg_reward}")
-                    print(f"Iteration {iteration}: average lap time = {avg_lap_time}")
-                    print(f"Iteration {iteration}: Fastest time = {fastest_time}")
+                    # print(f"Iteration {iteration}: average reward = {avg_reward}")
+                    # print(f"Iteration {iteration}: average lap time = {avg_lap_time}")
+                    # print(f"Iteration {iteration}: Fastest time = {fastest_time}")
                 else:
                     avg_reward = sum(rewards_per_episode) / total_episodes
                     avg_lap_time = None
-                    print(f"Iteration {iteration}: average reward = {avg_reward}")
-                    print(f"Iteration {iteration}: Fastest time = {fastest_time}")
+                    # print(f"Iteration {iteration}: average reward = {avg_reward}")
+                    # print(f"Iteration {iteration}: Fastest time = {fastest_time}")
                 
                 # Save metrics to the CSV file
                 with open(metrics_file, mode='a', newline='') as file:
@@ -582,5 +591,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # create_training_gif(folder="frames", output_filename="training_process.gif", fps=60, agent_name = "td3", map = "lake_circle")
     main()

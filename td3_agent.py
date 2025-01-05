@@ -91,7 +91,7 @@ class TD3Agent:
         self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=0.00011)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=0.00074661)
 
         self.critic1 = Critic(state_dim, action_dim).to(self.device)
         self.critic2 = Critic(state_dim, action_dim).to(self.device)
