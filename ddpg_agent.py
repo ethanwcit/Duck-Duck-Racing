@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 from collections import deque
+import os
 # Determine the device (CPU or GPU)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Actor Network
@@ -104,6 +105,7 @@ class DDPGAgent:
         target_Q = self.critic_target(next_states, next_actions)
         target_Q = rewards + (1 - dones) * self.gamma * target_Q.detach()
         current_Q = self.critic(states, actions)
+
         critic_loss = nn.MSELoss()(current_Q, target_Q)
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
@@ -120,4 +122,15 @@ class DDPGAgent:
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
         for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-        return {'actor': actor_loss, 'critic': critic_loss.item()}, current_Q.mean().item()
+        return {'actor': actor_loss.item(), 'critic': critic_loss.item()}, current_Q.mean().item()
+    
+    def save(self, filename, folder="saved_agents"):
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        torch.save({
+            'actor_state_dict': self.actor.state_dict(),
+            'critic_state_dict': self.critic.state_dict(),
+            'actor_optimizer_state_dict': self.actor_optimizer.state_dict(),
+            'critic_optimizer_state_dict': self.critic_optimizer.state_dict(),
+        }, os.path.join(folder, filename))
+        print(f"Agent's state saved to {filename}.")
