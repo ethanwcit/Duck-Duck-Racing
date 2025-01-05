@@ -507,7 +507,7 @@ def main():
                             # if reward != 0:
                             #     print(f"Duck: {i} Reward: {reward}")
                             agents[i].add_to_replay(state, action, reward, next_state, done)
-                            loss, q_value = agents[i].train(batch_size=64)
+                            loss, q_value = agents[i].train(batch_size=256)
                             if loss['actor'] is not None:
                                 episode_actor_loss += loss['actor']
                             episode_critic_loss += loss['critic']
@@ -530,7 +530,7 @@ def main():
                         pygame.display.update()
                         # Save the current frame
                         if (episode_timesteps -1) % 25==0:
-                            save_frame(SCREEN, frame_count, folder = os.path.join(iteration_folder, "frames"))
+                            # save_frame(SCREEN, frame_count, folder = os.path.join(iteration_folder, "frames"))
                             frame_count += 1
                         clock.tick(FPS)
                     rewards_per_episode.append(sum(total_rewards))
@@ -577,7 +577,7 @@ def main():
                     writer.writerow([agent_name, map_name, iteration, avg_reward, avg_lap_time, fastest_time])
                 create_heatmap(position_log, SCREEN_WIDTH, SCREEN_HEIGHT, folder=iteration_folder, track = os.path.join("Assets", map_path), agent_name=agent_name, map=map_name)
                 plot_graphs(total_episodes, rewards_per_episode, lap_times_per_episode, actor_losses, critic_losses, q_values, folder=iteration_folder, agent_name=agent_name, map=map_name)
-                create_training_gif(folder=frames_folder, output_filename="training_process.gif", fps=60, folder_save=iteration_folder, agent_name=agent_name, map=map_name)
+                # create_training_gif(folder=frames_folder, output_filename="training_process.gif", fps=60, folder_save=iteration_folder, agent_name=agent_name, map=map_name)
     pygame.quit()
 
 
