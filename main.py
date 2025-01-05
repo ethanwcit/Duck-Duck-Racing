@@ -27,7 +27,7 @@ pygame.init()
 pygame.display.set_caption('Duck Duck: RACING')
 ICON = pygame.image.load(os.path.join("Assets", "sac.png"))
 pygame.display.set_icon(ICON)
-TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
+TRACK = pygame.image.load(os.path.join("Assets", "lake_duck.png"))
 
 DUCK = f"{AGENT.lower()}.png"
 
@@ -53,7 +53,7 @@ class DuckRacer(pygame.sprite.Sprite):
         super().__init__()
         self.original_image = pygame.image.load(os.path.join("Assets", "sac.png"))
         self.image = self.original_image
-        self.rect = self.image.get_rect(center=(490, 820))
+        self.rect = self.image.get_rect(center=(660, 900))
         self.vel_vector = pygame.math.Vector2(1, 0)
         self.angle = 0
         self.rotation_vel = 5
@@ -68,10 +68,10 @@ class DuckRacer(pygame.sprite.Sprite):
         self.lap_progress = 0  # Track progress around the lap
         self.total_laps = 0  # Total laps to complete
         self.checkpoints = [ # Checkpoints coordinates
-            (570, 780, 5, 160),
-            (900, 750, 5, 160),
-            (900, 110, 5, 160),
-            (140, 500, 160, 5)   
+            (500, 830, 5, 110),
+            (970, 475, 5, 110),
+            (580, 62, 5, 110),
+            (350, 510, 110, 5)
         ]
         self.last_checkpoint_i = -1
         self.next_checkpoint_i = 1
@@ -274,10 +274,10 @@ def run_training(agents, num_episodes, max_timesteps):
         episode_timesteps = 0
         
         coins = pygame.sprite.Group(
-            Coin(980, 250),
-            Coin(600, 130),
-            Coin(800, 850),
-            Coin(230, 400)
+            Coin(256, 350),
+            Coin(1200, 525),
+            Coin(420, 844),
+            Coin(675, 125)
         )
         
         while True:
@@ -401,7 +401,7 @@ def main_with_hyperparameter_optimisation():
     # Create study and run optimization
     study = optuna.create_study(direction="maximize")
     # SET THE AGENT TO OPTIMISE HERE
-    study.optimize(objective_td3, n_trials=20)
+    study.optimize(objective_sac, n_trials=20)
     
     # Prepare results for all trials
     optimization_results = []
