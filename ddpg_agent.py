@@ -36,20 +36,30 @@ class Critic(nn.Module):
 # Replay Buffer
 class ReplayBuffer:
     def __init__(self, max_size=100000):
-        self.buffer = deque(maxlen=max_size)
+        self.buffer = deque(maxlen=max_size) #Use deque instead of list for faster operation
+        self.max_size = max_size
 
     def add(self, state, action, reward, next_state, done):
+        # Detach the tensor, move it to CPU, and convert to numpy array
+        action = action.detach().cpu().numpy() if isinstance(action, torch.Tensor) else np.array(action, dtype=np.float32)
+        reward = reward.detach().cpu().numpy() if isinstance(reward, torch.Tensor) else np.array(reward, dtype=np.float32)
+        next_state = next_state.detach().cpu().numpy() if isinstance(next_state, torch.Tensor) else np.array(next_state, dtype=np.float32)
+        done = done.detach().cpu().numpy() if isinstance(done, torch.Tensor) else np.array(done, dtype=np.float32)
+        # Add transition to the buffer
         self.buffer.append((state, action, reward, next_state, done))
+        # if len(self.buffer) > self.max_size:
+        #     self.buffer.pop(0)
 
     def sample(self, batch_size):
-        batch = random.sample(self.buffer, batch_size)
-        states, actions, rewards, next_states, dones = zip(*batch)
+        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+        states, actions, rewards, next_states, dones = zip(*[self.buffer[idx] for idx in indices])
+        # print(f"nextStates:{next_states}")
         return (
-            np.array(states),
-            np.array(actions),
-            np.array(rewards),
-            np.array(next_states),
-            np.array(dones)
+            np.array(states, dtype=np.float32),
+            np.array(actions, dtype=np.float32),
+            np.array(rewards, dtype=np.float32),
+            np.array(next_states, dtype=np.float32),
+            np.array(dones, dtype=np.float32),
         )
 
 # DDPG Agent
@@ -88,9 +98,12 @@ class DDPGAgent:
         action = np.clip(action, -self.max_action, self.max_action)
         
         return action
+    
+    def add_to_replay(self, state, action, reward, next_state, done):
+        self.replay_buffer.add(state, action, reward, next_state, done)
     def train(self, batch_size=64):
         if len(self.replay_buffer.buffer) < batch_size:
-            return
+            return {'actor': 0.0, 'critic': 0.0}, 0.0  # Return default values if there's insufficient data.
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
         print(states, actions, rewards, next_states, dones)
@@ -120,3 +133,4 @@ class DDPGAgent:
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
         for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        return {'actor': actor_loss, 'critic': critic_loss.item()}, current_Q.mean().item()

@@ -91,7 +91,7 @@ class TD3Agent:
         self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=0.00074661)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=0.00011)
 
         self.critic1 = Critic(state_dim, action_dim).to(self.device)
         self.critic2 = Critic(state_dim, action_dim).to(self.device)
@@ -186,11 +186,13 @@ class TD3Agent:
         next_states = torch.FloatTensor(next_states).to(self.device)
         dones = torch.FloatTensor(dones).unsqueeze(1).to(self.device)
 
-        # Compute target Q values
-        next_actions = self.apply_policy_noise(next_states)
-        target_Q1 = self.critic1_target(next_states, next_actions)
-        target_Q2 = self.critic2_target(next_states, next_actions)
-        target_Q = rewards + (1 - dones) * self.gamma * torch.min(target_Q1, target_Q2).detach()
+        # Compute target Q values without tracking gradients
+        with torch.no_grad():
+            # Compute target Q values
+            next_actions = self.apply_policy_noise(next_states)
+            target_Q1 = self.critic1_target(next_states, next_actions)
+            target_Q2 = self.critic2_target(next_states, next_actions)
+            target_Q = rewards + (1 - dones) * self.gamma * torch.min(target_Q1, target_Q2).detach()
 
         # Update critic networks
         current_Q1 = self.critic1(states, actions)
