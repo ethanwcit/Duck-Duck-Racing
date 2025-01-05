@@ -239,3 +239,23 @@ class TD3Agent:
             'critic_optimizer2_state_dict': self.critic_optimizer2.state_dict()
         }, os.path.join(folder, filename))
         print(f"Agent's state saved to {filename}.")
+
+    def load(self, filename, folder="saved_agents"):
+        filepath = os.path.join(folder, filename)
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"No saved agent state found at {filepath}.")
+        
+        checkpoint = torch.load(filepath, map_location=self.device)
+        
+        self.actor.load_state_dict(checkpoint['actor_state_dict'])
+        self.critic1.load_state_dict(checkpoint['critic1_state_dict'])
+        self.critic2.load_state_dict(checkpoint['critic2_state_dict'])
+        self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+        self.critic_optimizer1.load_state_dict(checkpoint['critic_optimizer1_state_dict'])
+        self.critic_optimizer2.load_state_dict(checkpoint['critic_optimizer2_state_dict'])
+        
+        self.actor_target.load_state_dict(checkpoint['actor_state_dict'])
+        self.critic1_target.load_state_dict(checkpoint['critic1_state_dict'])
+        self.critic2_target.load_state_dict(checkpoint['critic2_state_dict'])
+        
+        print(f"Agent's state loaded from {filename}.")
