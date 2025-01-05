@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import random
 from collections import deque
 
 # Actor Network
@@ -42,81 +41,85 @@ class ReplayBuffer:
         self.buffer.append((state, action, reward, next_state, done))
 
     def sample(self, batch_size):
-        batch = random.sample(self.buffer, batch_size)
-        states, actions, rewards, next_states, dones = zip(*batch)
+        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+        states, actions, rewards, next_states, dones = zip(*[self.buffer[idx] for idx in indices])
         return (
-            np.array(states),
-            np.array(actions),
-            np.array(rewards),
-            np.array(next_states),
-            np.array(dones)
+            np.array(states, dtype=np.float32),
+            np.array(actions, dtype=np.float32),
+            np.array(rewards, dtype=np.float32),
+            np.array(next_states, dtype=np.float32),
+            np.array(dones, dtype=np.float32),
         )
 
-# DDPG Agent
 class DDPGAgent:
-    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=1e-3, noise_clip=1.2):
-        self.actor = Actor(state_dim, action_dim, max_action).cuda()
-        self.actor_target = Actor(state_dim, action_dim, max_action).cuda()
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-4):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
+        self.actor_target = Actor(state_dim, action_dim, max_action).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr)
 
-        self.critic = Critic(state_dim, action_dim).cuda()
-        self.critic_target = Critic(state_dim, action_dim).cuda()
+        self.critic = Critic(state_dim, action_dim).to(self.device)
+        self.critic_target = Critic(state_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=lr)
-        self.noise_clip = noise_clip
+
         self.replay_buffer = ReplayBuffer()
         self.gamma = gamma
         self.tau = tau
         self.max_action = max_action
 
-    # def select_action(self, state):
-    #     state = torch.FloatTensor(state).unsqueeze(0).cuda()
-    #     return self.actor(state).cpu().data.numpy().flatten()
-    def select_action(self, state, exploration_noise=0.7):
-        # Convert state to a PyTorch tensor if it's not already
-        state = torch.FloatTensor(state).unsqueeze(0).cuda()  # Ensure it's a 2D tensor for batch input
+    def add_to_replay(self, state, action, reward, next_state, done):
+        self.replay_buffer.add(state, action, reward, next_state, done)
 
-        # Get action from the actor network
-        action = self.actor(state)  
+    def select_action(self, state, exploration_noise=0.1):
+        state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        action = self.actor(state).cpu().data.numpy().flatten()
+        if exploration_noise > 0:
+            action += np.random.normal(0, exploration_noise, size=action.shape)
+        return np.clip(action, -self.max_action, self.max_action)
 
-        # Add exploration noise
-        action = action.cpu().data.numpy().flatten()  # Convert back to NumPy for further manipulation (optional)
-        action = action + np.random.normal(0, exploration_noise, size=action.shape).clip(-self.noise_clip, self.noise_clip)  # Add noise for exploration
-
-        # Clip to valid action range
-        action = np.clip(action, -self.max_action, self.max_action)
-        
-        return action
     def train(self, batch_size=64):
         if len(self.replay_buffer.buffer) < batch_size:
             return
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
-        print(states, actions, rewards, next_states, dones)
-        actions = torch.FloatTensor(actions).cuda()
-        rewards = torch.FloatTensor(rewards).unsqueeze(1).cuda()
-        next_states = torch.FloatTensor(next_states).cuda()
-        dones = torch.FloatTensor(dones).unsqueeze(1).cuda()
 
-        # Train Critic
-        next_actions = self.actor_target(next_states)
-        target_Q = self.critic_target(next_states, next_actions)
-        target_Q = rewards + (1 - dones) * self.gamma * target_Q.detach()
+        states = torch.FloatTensor(states).to(self.device)
+        actions = torch.FloatTensor(actions).to(self.device)
+        rewards = torch.FloatTensor(rewards).unsqueeze(1).to(self.device)
+        next_states = torch.FloatTensor(next_states).to(self.device)
+        dones = torch.FloatTensor(dones).unsqueeze(1).to(self.device)
+
+        # Compute target Q-value
+        with torch.no_grad():
+            next_actions = self.actor_target(next_states)
+            target_Q = self.critic_target(next_states, next_actions)
+            target_Q = rewards + (1 - dones) * self.gamma * target_Q
+
+        # Get current Q estimate
         current_Q = self.critic(states, actions)
+
+        # Compute critic loss
         critic_loss = nn.MSELoss()(current_Q, target_Q)
+
+        # Optimize the critic
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         self.critic_optimizer.step()
 
-        # Train Actor
+        # Compute actor loss
         actor_loss = -self.critic(states, self.actor(states)).mean()
+
+        # Optimize the actor
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
         self.actor_optimizer.step()
 
-        # Update Target Networks
-        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
-            target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+        # Update target networks
         for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
+            target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+
+        for param, target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
             target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)

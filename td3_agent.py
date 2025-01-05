@@ -85,7 +85,7 @@ class OUNoise:
 
 # DDPG Agent
 class TD3Agent:
-    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-4, policy_noise=0.4 , noise_clip=1.0, policy_delay=2):
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.975900107569934, tau=0.00864066972950235, lr=0.000746613784700499, policy_noise=0.393023526098981 , noise_clip=1.44931126998, policy_delay=2):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         self.actor = Actor(state_dim, action_dim, max_action).to(self.device)
@@ -139,17 +139,6 @@ class TD3Agent:
         action = np.clip(action, -self.max_action, self.max_action)
         
         return action
-    # def select_action(self, state, exploration_noise=0.1):
-    #     state = torch.FloatTensor(state).unsqueeze(0).to(self.device)  # Ensure it's a 2D tensor for batch input
-    #     action = self.actor(state)
-    #     # print(f"before {action}")
-    #     noise = self.noise.sample() #* exploration_noise
-    #     action = action + torch.tensor(noise).float().to(self.device)  # Add noise to action
-    #     # print(action)
-    #     action = torch.clamp(action, -self.max_action, self.max_action)  # Clip action
-    #     action = action.cpu().data.numpy().flatten()  # Convert back to NumPy
-    #     # print(action)
-    #     return action
     
     def update_noise(self, episode):
         """Decay the noise as the episodes progress."""

@@ -1,6 +1,9 @@
+import optuna
+import pandas as pd
+from datetime import datetime
+import numpy as np
 import pygame
 import os
-import numpy as np
 import math
 from ddpg_agent import DDPGAgent
 from td3_agent import TD3Agent
@@ -11,15 +14,21 @@ COIN_REWARD = 400 # Reward for collecting a coin
 SCREEN_WIDTH = 1244
 SCREEN_HEIGHT = 1016
 FPS = 60
+SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+
+
+#####
+AGENT = "TD3"
+#####
+
+
 pygame.init()
 pygame.display.set_caption('Duck Duck: RACING')
-SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-ICON = pygame.image.load(os.path.join("Assets", "ddpg.png"))
+ICON = pygame.image.load(os.path.join("Assets", f"{AGENT.lower()}.png"))
 pygame.display.set_icon(ICON)
 TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
 
-# Change based on agent used
-DUCK = "td3.png"
+DUCK = f"{AGENT.lower()}.png"
 
 class Coin(pygame.sprite.Sprite):
     def __init__(self, x, y):
@@ -86,7 +95,7 @@ class DuckRacer(pygame.sprite.Sprite):
             self.last_checkpoint_i = self.next_checkpoint_i
             self.next_checkpoint_i = (self.next_checkpoint_i + 1) % len(self.checkpoints)
             self.lap_progress += 1
-            print(f"Lap progress: {self.lap_progress}/3 , Next checkpoint: {self.next_checkpoint_i}")
+            # print(f"Lap progress: {self.lap_progress}/3 , Next checkpoint: {self.next_checkpoint_i}")
             # Check if lap is completed
             if self.lap_progress == len(self.checkpoints):
                 self.total_laps += 1
@@ -145,13 +154,26 @@ class DuckRacer(pygame.sprite.Sprite):
         self.rect.center += self.vel_vector
     def collision(self):
         length = 40
-        collision_point_right = [int(self.rect.center[0] + math.cos(math.radians(self.angle + 18)) * length),
-                                 int(self.rect.center[1] - math.sin(math.radians(self.angle + 18)) * length)]
-        collision_point_left = [int(self.rect.center[0] + math.cos(math.radians(self.angle - 18)) * length),
-                                int(self.rect.center[1] - math.sin(math.radians(self.angle - 18)) * length)]
+        collision_point_right = [
+            int(self.rect.center[0] + math.cos(math.radians(self.angle + 18)) * length),
+            int(self.rect.center[1] - math.sin(math.radians(self.angle + 18)) * length),
+        ]
+        collision_point_left = [
+            int(self.rect.center[0] + math.cos(math.radians(self.angle - 18)) * length),
+            int(self.rect.center[1] - math.sin(math.radians(self.angle - 18)) * length),
+        ]
 
-        if SCREEN.get_at(collision_point_right) == pygame.Color(207,230,186,255) \
-                or SCREEN.get_at(collision_point_left) == pygame.Color(207,230,186,255):
+        collision_point_right = [
+            max(0, min(SCREEN_WIDTH - 1, collision_point_right[0])),
+            max(0, min(SCREEN_HEIGHT - 1, collision_point_right[1])),
+        ]
+        collision_point_left = [
+            max(0, min(SCREEN_WIDTH - 1, collision_point_left[0])),
+            max(0, min(SCREEN_HEIGHT - 1, collision_point_left[1])),
+        ]
+
+        if SCREEN.get_at(collision_point_right) == pygame.Color(207, 230, 186, 255) or \
+        SCREEN.get_at(collision_point_left) == pygame.Color(207, 230, 186, 255):
             self.alive = False
 
         pygame.draw.circle(SCREEN, (0, 255, 255, 0), collision_point_right, 4)
@@ -178,17 +200,22 @@ class DuckRacer(pygame.sprite.Sprite):
         x = int(self.rect.center[0])
         y = int(self.rect.center[1])
 
-        while not SCREEN.get_at((x, y)) == pygame.Color(207,230,186,255) and length < 200:
-            length += 1
+        while length < self.radar_max:
             x = int(self.rect.center[0] + math.cos(math.radians(self.angle + radar_angle)) * length)
             y = int(self.rect.center[1] - math.sin(math.radians(self.angle + radar_angle)) * length)
+
+            if not (0 <= x < SCREEN_WIDTH and 0 <= y < SCREEN_HEIGHT):
+                break
+
+            if SCREEN.get_at((x, y)) == pygame.Color(207, 230, 186, 255):  # Check for collision
+                break
+
+            length += 1
 
         pygame.draw.line(SCREEN, (255, 255, 255, 255), self.rect.center, (x, y), 1)
         pygame.draw.circle(SCREEN, (0, 255, 0, 0), (x, y), 3)
 
-        dist = int(math.sqrt(math.pow(self.rect.center[0] - x, 2)
-                             + math.pow(self.rect.center[1] - y, 2)))
-
+        dist = int(math.sqrt(math.pow(self.rect.center[0] - x, 2) + math.pow(self.rect.center[1] - y, 2)))
         self.radars.append([radar_angle, dist])
 
     def data(self):
@@ -227,17 +254,20 @@ def cal_checkpoint_reward(duck):
     # If moving away from the checkpoint, penalize more
     if dot_product < 0:
         reward = dot_product * 20  # Strong negative reward for moving away
-    # print(f"Dot product: {dot_product}, Distance to checkpoint: {distance_to_checkpoint}, Next checkpoint: {next_checkpoint}")
+
     return reward
 def main():
     clock = pygame.time.Clock()
 
-    num_agents = 3
+    num_agents = 5
     state_dim = 5
     action_dim = 2  
     max_action = 1
 
-    agents = [TD3Agent(state_dim, action_dim, max_action) for _ in range(num_agents)]
+    agents = [
+        DDPGAgent(state_dim, action_dim, max_action) if AGENT == "DDPG" else TD3Agent(state_dim, action_dim, max_action)
+        for _ in range(num_agents)
+    ]
 
     coins = pygame.sprite.Group(
         Coin(980, 250),
@@ -264,7 +294,7 @@ def main():
                     coin_index = event.type - pygame.USEREVENT
                     if 0 <= coin_index < len(coins.sprites()):
                         coins.sprites()[coin_index].reset_color()
-
+ 
             SCREEN.blit(TRACK, (0, 0))
             coins.draw(SCREEN)
             for i, checkpoint in enumerate(ducks[0].checkpoints):
@@ -284,12 +314,13 @@ def main():
                 duck.target_velocity = max(2, min(10, action[1]*7))
 
                 reward = cal_checkpoint_reward(duck)
-                # print(f"Reward: {reward}")
 
                 duck.update()
                 reward += duck.update_lap_progress()
                 reward += duck.check_coin_collision(coins)
-                agents[i].update_noise(episode)
+                if hasattr(agents[i], 'update_noise'):
+                    agents[i].update_noise(episode)
+
                 if not duck.alive:
                     reward = -1000
                     done = True
@@ -301,8 +332,6 @@ def main():
                     next_state = np.array(next_state, dtype=np.float32)
                     done = episode_timesteps >= max_timesteps
 
-                # if reward != 0:
-                #     print(f"Duck: {i} Reward: {reward}")
                 agents[i].add_to_replay(state, action, reward, next_state, done)
                 agents[i].train(batch_size=256)
 
@@ -320,5 +349,187 @@ def main():
 
     pygame.quit()
 
+def run_training(agents, num_episodes, max_timesteps):
+    """Helper function to run training episodes and return rewards"""
+    pygame.init()
+    SCREEN = pygame.display.set_mode((1244, 1016))
+    TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
+    
+    all_episode_rewards = []
+    num_agents = len(agents)
+    
+    for episode in range(num_episodes):
+        ducks = [DuckRacer() for _ in range(num_agents)]
+        duck_groups = pygame.sprite.Group(*ducks)
+        total_rewards = [0] * num_agents
+        episode_timesteps = 0
+        
+        coins = pygame.sprite.Group(
+            Coin(980, 250),
+            Coin(600, 130),
+            Coin(800, 850),
+            Coin(230, 400)
+        )
+        
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return float('-inf')
+                if event.type >= pygame.USEREVENT:
+                    coin_index = event.type - pygame.USEREVENT
+                    if 0 <= coin_index < len(coins.sprites()):
+                        coins.sprites()[coin_index].reset_color()
+            
+            SCREEN.blit(TRACK, (0, 0))
+            coins.draw(SCREEN)
+            for i, checkpoint in enumerate(ducks[0].checkpoints):
+                pygame.draw.rect(SCREEN, (80, 90, 145), checkpoint)
+            
+            for i, duck in enumerate(ducks):
+                if not duck.alive:
+                    continue
+                    
+                state = np.array(duck.data(), dtype=np.float32)
+                action = agents[i].select_action(state, 0.4)  # Using default noise value
+                
+                duck.target_direction = 1 if action[0] > 0.5 else -1 if action[0] < -0.5 else 0
+                duck.target_velocity = max(2, min(10, action[1]*7))
+                
+                reward = cal_checkpoint_reward(duck)
+                duck.update()
+                reward += duck.update_lap_progress()
+                reward += duck.check_coin_collision(coins)
+                
+                if not duck.alive:
+                    reward = -1000
+                    done = True
+                    next_state = np.zeros_like(state)
+                else:
+                    reward += 0.0001
+                    total_rewards[i] += reward
+                    next_state = np.array(duck.data(), dtype=np.float32)
+                    done = episode_timesteps >= max_timesteps
+                
+                agents[i].add_to_replay(state, action, reward, next_state, done)
+                agents[i].train(batch_size=256)
+            
+            episode_timesteps += 1
+            
+            if all(not duck.alive for duck in ducks) or episode_timesteps >= max_timesteps:
+                avg_reward = sum(total_rewards) / num_agents
+                all_episode_rewards.append(avg_reward)
+                print(f"Episode {episode + 1}: Average Reward = {avg_reward:.2f}")
+                break
+            
+            duck_groups.draw(SCREEN)
+            pygame.display.update()
+    
+    return all_episode_rewards
+
+def objective(trial):
+    # Hyperparameter search space
+    gamma = trial.suggest_float("gamma", 0.95, 0.999)
+    tau = trial.suggest_float("tau", 0.001, 0.01)
+    lr = trial.suggest_float("lr", 1e-4, 1e-3, log=True)
+    policy_noise = trial.suggest_float("policy_noise", 0.1, 0.5)
+    noise_clip = trial.suggest_float("noise_clip", 0.5, 2.0)
+    policy_delay = trial.suggest_int("policy_delay", 1, 4)
+    
+    # Initialize agents with trial hyperparameters
+    num_agents = 1
+    state_dim = 5
+    action_dim = 2
+    max_action = 1
+    
+    agents = [TD3Agent(state_dim, action_dim, max_action, 
+                      gamma=gamma, tau=tau, lr=lr,
+                      policy_noise=policy_noise, 
+                      noise_clip=noise_clip,
+                      policy_delay=policy_delay) for _ in range(num_agents)]
+    
+    rewards = run_training(agents, num_episodes=100, max_timesteps=5000)
+    return np.mean(rewards)
+
+def main_with_hyperparameter_optimisation():
+    # Initialize parameters for baseline run
+    num_agents = 1
+    state_dim = 5
+    action_dim = 2
+    max_action = 1
+    
+    print("\n=== Running Baseline with Default Parameters ===")
+    # Create agents with default parameters
+    baseline_agents = [TD3Agent(state_dim, action_dim, max_action) for _ in range(num_agents)]
+    
+    # Run baseline training
+    baseline_rewards = run_training(baseline_agents, num_episodes=100, max_timesteps=5000)
+    baseline_mean_reward = np.mean(baseline_rewards)
+    
+    print(f"\nBaseline Results:")
+    print(f"Mean Reward: {baseline_mean_reward:.2f}")
+    print(f"Default Parameters:")
+    print(f"gamma: 0.99")
+    print(f"tau: 0.005")
+    print(f"learning_rate: 3e-4")
+    print(f"policy_noise: 0.4")
+    print(f"noise_clip: 1.0")
+    print(f"policy_delay: 2")
+    
+    # Create DataFrame for baseline results
+    baseline_results = pd.DataFrame([{
+        'gamma': 0.975900107569934,
+        'tau': 0.00864066972950235,
+        'learning_rate': 0.000746613784700499,
+        'policy_noise': 0.393023526098981,
+        'noise_clip': 1.44931126998,
+        'policy_delay': 2,
+        'mean_reward': baseline_mean_reward,
+        'type': 'baseline'
+    }])
+    
+    print("\n=== Starting Hyperparameter Optimization ===")
+    # Create study and run optimization
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=20)
+    
+    # Prepare results for all trials
+    optimization_results = []
+    for trial in study.trials:
+        result = {
+            'gamma': trial.params.get('gamma'),
+            'tau': trial.params.get('tau'),
+            'learning_rate': trial.params.get('lr'),
+            'policy_noise': trial.params.get('policy_noise'),
+            'noise_clip': trial.params.get('noise_clip'),
+            'policy_delay': trial.params.get('policy_delay'),
+            'mean_reward': trial.value,
+            'type': 'optimization'
+        }
+        optimization_results.append(result)
+    
+    # Combine baseline and optimization results
+    all_results = pd.concat([
+        baseline_results,
+        pd.DataFrame(optimization_results)
+    ])
+    
+    # Save results to Excel
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f'td3_hyperparameter_results_{timestamp}.xlsx'
+    all_results.to_excel(filename, index=False)
+    
+    # Print best parameters
+    print("\nBest hyperparameters found:")
+    print(f"Best mean reward: {study.best_value}")
+    print("Parameters:")
+    for key, value in study.best_params.items():
+        print(f"{key}: {value}")
+    
+    # Print comparison with baseline
+    print(f"\nImprovement over baseline: {((study.best_value - baseline_mean_reward) / abs(baseline_mean_reward)) * 100:.2f}%")
+    
+    return study.best_params, filename
+
 if __name__ == "__main__":
-    main()
+    best_params, results_file = main_with_hyperparameter_optimisation()
