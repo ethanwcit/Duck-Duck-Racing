@@ -5,6 +5,7 @@ import numpy as np
 import pygame
 import os
 import math
+from sac_agent import SACAgent
 from ddpg_agent import DDPGAgent
 from td3_agent import TD3Agent
 
@@ -18,13 +19,13 @@ SCREEN = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 
 
 #####
-AGENT = "TD3"
+AGENT = "DDPGAgent"
 #####
 
 
 pygame.init()
 pygame.display.set_caption('Duck Duck: RACING')
-ICON = pygame.image.load(os.path.join("Assets", f"{AGENT.lower()}.png"))
+ICON = pygame.image.load(os.path.join("Assets", "ddpg.png"))
 pygame.display.set_icon(ICON)
 TRACK = pygame.image.load(os.path.join("Assets", "lake.png"))
 
@@ -50,7 +51,7 @@ class Coin(pygame.sprite.Sprite):
 class DuckRacer(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
-        self.original_image = pygame.image.load(os.path.join("Assets", DUCK))
+        self.original_image = pygame.image.load(os.path.join("Assets", "ddpg.png"))
         self.image = self.original_image
         self.rect = self.image.get_rect(center=(490, 820))
         self.vel_vector = pygame.math.Vector2(1, 0)
@@ -256,98 +257,6 @@ def cal_checkpoint_reward(duck):
         reward = dot_product * 20  # Strong negative reward for moving away
 
     return reward
-def main():
-    clock = pygame.time.Clock()
-
-    num_agents = 5
-    state_dim = 5
-    action_dim = 2  
-    max_action = 1
-
-    agents = [
-        DDPGAgent(state_dim, action_dim, max_action) if AGENT == "DDPG" else TD3Agent(state_dim, action_dim, max_action)
-        for _ in range(num_agents)
-    ]
-
-    coins = pygame.sprite.Group(
-        Coin(980, 250),
-        Coin(600, 130),
-        Coin(800, 850),
-        Coin(230, 400)
-    )
-
-    total_episodes = 1000
-    max_timesteps = 5000
-
-    for episode in range(total_episodes):
-        ducks = [DuckRacer() for _ in range(num_agents)]
-        duck_groups = pygame.sprite.Group(*ducks)
-        total_rewards = [0] * num_agents
-        episode_timesteps = 0
-        paused = False
-
-        while not paused:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    paused = True
-                if event.type >= pygame.USEREVENT:
-                    coin_index = event.type - pygame.USEREVENT
-                    if 0 <= coin_index < len(coins.sprites()):
-                        coins.sprites()[coin_index].reset_color()
- 
-            SCREEN.blit(TRACK, (0, 0))
-            coins.draw(SCREEN)
-            for i, checkpoint in enumerate(ducks[0].checkpoints):
-                pygame.draw.rect(SCREEN, (80, 90, 145), checkpoint)
-
-            for i, duck in enumerate(ducks):
-                if not duck.alive:
-                    continue
-                reward = 0
-                state = duck.data()
-                state = np.array(state, dtype=np.float32)
-
-                exploration_noise = 0.4
-                action = agents[i].select_action(state, exploration_noise)
-
-                duck.target_direction = 1 if action[0] > 0.5 else -1 if action[0] < -0.5 else 0
-                duck.target_velocity = max(2, min(10, action[1]*7))
-
-                reward = cal_checkpoint_reward(duck)
-
-                duck.update()
-                reward += duck.update_lap_progress()
-                reward += duck.check_coin_collision(coins)
-                if hasattr(agents[i], 'update_noise'):
-                    agents[i].update_noise(episode)
-
-                if not duck.alive:
-                    reward = -1000
-                    done = True
-                    next_state = np.zeros_like(state, dtype=np.float32)
-                else:
-                    reward += 0.0001
-                    total_rewards[i] += reward
-                    next_state = duck.data()
-                    next_state = np.array(next_state, dtype=np.float32)
-                    done = episode_timesteps >= max_timesteps
-
-                agents[i].add_to_replay(state, action, reward, next_state, done)
-                agents[i].train(batch_size=256)
-
-            episode_timesteps += 1
-
-            if all(not duck.alive for duck in ducks) or episode_timesteps >= max_timesteps:
-                print(f"\n----------------Episode {episode + 1}/{total_episodes} ended.----------------")
-                for j, reward in enumerate(total_rewards):
-                    print(f"Duck {j + 1}: Total reward = {reward}")
-                break
-
-            duck_groups.draw(SCREEN)
-            pygame.display.update()
-            clock.tick(FPS)
-
-    pygame.quit()
 
 def run_training(agents, num_episodes, max_timesteps):
     """Helper function to run training episodes and return rewards"""
@@ -391,7 +300,7 @@ def run_training(agents, num_episodes, max_timesteps):
                     continue
                     
                 state = np.array(duck.data(), dtype=np.float32)
-                action = agents[i].select_action(state, 0.4)  # Using default noise value
+                action = agents[i].select_action(state)  # Using default noise value
                 
                 duck.target_direction = 1 if action[0] > 0.5 else -1 if action[0] < -0.5 else 0
                 duck.target_velocity = max(2, min(10, action[1]*7))
@@ -427,14 +336,12 @@ def run_training(agents, num_episodes, max_timesteps):
     
     return all_episode_rewards
 
-def objective(trial):
+def objective_sac(trial):
     # Hyperparameter search space
     gamma = trial.suggest_float("gamma", 0.95, 0.999)
     tau = trial.suggest_float("tau", 0.001, 0.01)
-    lr = trial.suggest_float("lr", 1e-4, 1e-3, log=True)
-    policy_noise = trial.suggest_float("policy_noise", 0.1, 0.5)
-    noise_clip = trial.suggest_float("noise_clip", 0.5, 2.0)
-    policy_delay = trial.suggest_int("policy_delay", 1, 4)
+    lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
+    alpha = trial.suggest_float("alpha", 0.05, 0.3)
     
     # Initialize agents with trial hyperparameters
     num_agents = 1
@@ -442,56 +349,38 @@ def objective(trial):
     action_dim = 2
     max_action = 1
     
-    agents = [TD3Agent(state_dim, action_dim, max_action, 
+    agents = [SACAgent(state_dim, action_dim, max_action, 
                       gamma=gamma, tau=tau, lr=lr,
-                      policy_noise=policy_noise, 
-                      noise_clip=noise_clip,
-                      policy_delay=policy_delay) for _ in range(num_agents)]
+                      alpha=alpha) for _ in range(num_agents)]
     
     rewards = run_training(agents, num_episodes=100, max_timesteps=5000)
     return np.mean(rewards)
 
-def main_with_hyperparameter_optimisation():
-    # Initialize parameters for baseline run
+def objective_ddpg(trial):
+    # Hyperparameter search space
+    gamma = trial.suggest_float("gamma", 0.95, 0.999)
+    tau = trial.suggest_float("tau", 0.001, 0.01)
+    lr = trial.suggest_float("lr", 1e-4, 5e-3, log=True)
+    
+    # Initialize agents with trial hyperparameters
     num_agents = 1
     state_dim = 5
     action_dim = 2
     max_action = 1
     
-    print("\n=== Running Baseline with Default Parameters ===")
-    # Create agents with default parameters
-    baseline_agents = [TD3Agent(state_dim, action_dim, max_action) for _ in range(num_agents)]
+    agents = [DDPGAgent(state_dim, action_dim, max_action, 
+                      gamma=gamma, tau=tau, lr=lr) for _ in range(num_agents)]
     
-    # Run baseline training
-    baseline_rewards = run_training(baseline_agents, num_episodes=100, max_timesteps=5000)
-    baseline_mean_reward = np.mean(baseline_rewards)
-    
-    print(f"\nBaseline Results:")
-    print(f"Mean Reward: {baseline_mean_reward:.2f}")
-    print(f"Default Parameters:")
-    print(f"gamma: 0.99")
-    print(f"tau: 0.005")
-    print(f"learning_rate: 3e-4")
-    print(f"policy_noise: 0.4")
-    print(f"noise_clip: 1.0")
-    print(f"policy_delay: 2")
-    
-    # Create DataFrame for baseline results
-    baseline_results = pd.DataFrame([{
-        'gamma': 0.975900107569934,
-        'tau': 0.00864066972950235,
-        'learning_rate': 0.000746613784700499,
-        'policy_noise': 0.393023526098981,
-        'noise_clip': 1.44931126998,
-        'policy_delay': 2,
-        'mean_reward': baseline_mean_reward,
-        'type': 'baseline'
-    }])
-    
+    rewards = run_training(agents, num_episodes=100, max_timesteps=5000)
+    return np.mean(rewards)
+
+def main_with_hyperparameter_optimisation():
+
     print("\n=== Starting Hyperparameter Optimization ===")
     # Create study and run optimization
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=20)
+    # SET THE AGENT TO OPTIMISE HERE
+    study.optimize(objective_ddpg, n_trials=20)
     
     # Prepare results for all trials
     optimization_results = []
@@ -500,23 +389,18 @@ def main_with_hyperparameter_optimisation():
             'gamma': trial.params.get('gamma'),
             'tau': trial.params.get('tau'),
             'learning_rate': trial.params.get('lr'),
-            'policy_noise': trial.params.get('policy_noise'),
-            'noise_clip': trial.params.get('noise_clip'),
-            'policy_delay': trial.params.get('policy_delay'),
+            'alpha': trial.params.get('alpha'),
             'mean_reward': trial.value,
             'type': 'optimization'
         }
         optimization_results.append(result)
     
     # Combine baseline and optimization results
-    all_results = pd.concat([
-        baseline_results,
-        pd.DataFrame(optimization_results)
-    ])
+    all_results = pd.DataFrame(optimization_results)
     
     # Save results to Excel
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f'td3_hyperparameter_results_{timestamp}.xlsx'
+    filename = f'hyperparameter_results_{timestamp}.xlsx'
     all_results.to_excel(filename, index=False)
     
     # Print best parameters
@@ -525,9 +409,6 @@ def main_with_hyperparameter_optimisation():
     print("Parameters:")
     for key, value in study.best_params.items():
         print(f"{key}: {value}")
-    
-    # Print comparison with baseline
-    print(f"\nImprovement over baseline: {((study.best_value - baseline_mean_reward) / abs(baseline_mean_reward)) * 100:.2f}%")
     
     return study.best_params, filename
 
