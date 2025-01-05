@@ -47,7 +47,7 @@ class DuckRacer(pygame.sprite.Sprite):
         super().__init__()
         self.original_image = pygame.image.load(os.path.join("Assets", duck))
         self.image = self.original_image
-        self.rect = self.image.get_rect(center=(490, 820))
+        self.rect = self.image.get_rect(center=(490, 850))
         self.vel_vector = pygame.math.Vector2(1, 0)
         self.angle = 0
         self.rotation_vel = 5
@@ -366,7 +366,7 @@ def main():
     # Define the different maps and agents
     # maps = ["lake_circle.png", "lake.png", "lake_duck.png"]  # Add your map file names here
     # agents = ["td3.png", "ddpg.png", "sac.png"]  # Add your agent names here
-    maps = [ "lake.png" , "lake_circle.png"]  # Add your map file names here
+    maps = ["lake_circle.png"]  # Add your map file names here
     agents_paths = ["ddpg.png"]  # Add your agent names here
     num_iterations = 5  # Number of training iterations
     base_output_folder = "metrics"
@@ -456,8 +456,9 @@ def main():
                                 paused = True
                             if event.type >= pygame.USEREVENT:
                                 coin_index = event.type - pygame.USEREVENT
-                                if 0 <= coin_index < len(coins.sprites()):
-                                    coins.sprites()[coin_index].reset_color()
+                                if coins != None:
+                                    if 0 <= coin_index < len(coins.sprites()):
+                                        coins.sprites()[coin_index].reset_color()
 
                         SCREEN.blit(TRACK, (0, 0))
                         if coins:

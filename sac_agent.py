@@ -49,7 +49,7 @@ class Critic(nn.Module):
 
 # Replay Buffer
 class ReplayBuffer:
-    def __init__(self, max_size=100000):
+    def __init__(self, max_size=10000000):
         self.buffer = deque(maxlen=max_size) #Use deque instead of list for faster operation
         self.max_size = max_size
 
