@@ -4,7 +4,8 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 from collections import deque
-
+# Determine the device (CPU or GPU)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Actor Network
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_action):
@@ -64,40 +65,26 @@ class ReplayBuffer:
 
 # DDPG Agent
 class DDPGAgent:
-    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=1e-3, noise_clip=1.2):
-        self.actor = Actor(state_dim, action_dim, max_action).cuda()
-        self.actor_target = Actor(state_dim, action_dim, max_action).cuda()
+    def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=1e-3):
+        self.actor = Actor(state_dim, action_dim, max_action).to(device)
+        self.actor_target = Actor(state_dim, action_dim, max_action).to(device)
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr)
 
-        self.critic = Critic(state_dim, action_dim).cuda()
-        self.critic_target = Critic(state_dim, action_dim).cuda()
+        self.critic = Critic(state_dim, action_dim).to(device)
+        self.critic_target = Critic(state_dim, action_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=lr)
-        self.noise_clip = noise_clip
+
         self.replay_buffer = ReplayBuffer()
         self.gamma = gamma
         self.tau = tau
         self.max_action = max_action
 
-    # def select_action(self, state):
-    #     state = torch.FloatTensor(state).unsqueeze(0).cuda()
-    #     return self.actor(state).cpu().data.numpy().flatten()
-    def select_action(self, state, exploration_noise=0.7):
-        # Convert state to a PyTorch tensor if it's not already
-        state = torch.FloatTensor(state).unsqueeze(0).cuda()  # Ensure it's a 2D tensor for batch input
+    def select_action(self, state):
+        state = torch.FloatTensor(state).unsqueeze(0).cuda()
+        return self.actor(state).cpu().data.numpy().flatten()
 
-        # Get action from the actor network
-        action = self.actor(state)  
-
-        # Add exploration noise
-        action = action.cpu().data.numpy().flatten()  # Convert back to NumPy for further manipulation (optional)
-        action = action + np.random.normal(0, exploration_noise, size=action.shape).clip(-self.noise_clip, self.noise_clip)  # Add noise for exploration
-
-        # Clip to valid action range
-        action = np.clip(action, -self.max_action, self.max_action)
-        
-        return action
     
     def add_to_replay(self, state, action, reward, next_state, done):
         self.replay_buffer.add(state, action, reward, next_state, done)
@@ -106,11 +93,11 @@ class DDPGAgent:
             return {'actor': 0.0, 'critic': 0.0}, 0.0  # Return default values if there's insufficient data.
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
-        print(states, actions, rewards, next_states, dones)
-        actions = torch.FloatTensor(actions).cuda()
-        rewards = torch.FloatTensor(rewards).unsqueeze(1).cuda()
-        next_states = torch.FloatTensor(next_states).cuda()
-        dones = torch.FloatTensor(dones).unsqueeze(1).cuda()
+        states = torch.FloatTensor(states).to(device)
+        actions = torch.FloatTensor(actions).to(device)
+        rewards = torch.FloatTensor(rewards).unsqueeze(1).to(device)
+        next_states = torch.FloatTensor(next_states).to(device)
+        dones = torch.FloatTensor(dones).unsqueeze(1).to(device)
 
         # Train Critic
         next_actions = self.actor_target(next_states)

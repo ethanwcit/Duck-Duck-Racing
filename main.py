@@ -367,7 +367,7 @@ def main():
     # maps = ["lake_circle.png", "lake.png", "lake_duck.png"]  # Add your map file names here
     # agents = ["td3.png", "ddpg.png", "sac.png"]  # Add your agent names here
     maps = [ "lake_circle.png","lake.png"]  # Add your map file names here
-    agents_paths = ["sac.png"]  # Add your agent names here
+    agents_paths = ["ddpg.png"]  # Add your agent names here
     num_iterations = 5  # Number of training iterations
     base_output_folder = "metrics"
     metrics_file = os.path.join(base_output_folder, "iteration_metrics.csv")
