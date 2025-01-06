@@ -376,7 +376,7 @@ def main():
     # Define the different maps and agents
     # maps = ["lake_circle.png", "lake.png", "lake_duck.png"]  # Add your map file names here
     # agents = ["td3.png", "ddpg.png", "sac.png"]  # Add your agent names here
-    maps = ["lake_circle.png" , "lake.png", "lake_duck.png"]  # Add your map file names here
+    maps = ["lake_duck.png"]  # Add your map file names here
     agents_paths = ["td3.png"]  # Add your agent names here
     num_iterations = 1  # Number of training iterations
     base_output_folder = "metrics"
