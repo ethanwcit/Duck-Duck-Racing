@@ -45,6 +45,7 @@ class Coin(pygame.sprite.Sprite):
 class DuckRacer(pygame.sprite.Sprite):
     def __init__(self,map_name, duck):
         super().__init__()
+        self.agent = duck.removesuffix(".png")
         self.original_image = pygame.image.load(os.path.join("Assets", duck))
         self.image = self.original_image
         self.rect = self.image.get_rect(center=(490, 850))
@@ -103,7 +104,7 @@ class DuckRacer(pygame.sprite.Sprite):
                 self.lap_times.append(round(lap_time / 1000, 2))
                 # reward = LAP_REWARD + max(0, 1000 * (0.99 ** (lap_time // 50)))  # Exponential decay function for reward
                 reward = LAP_REWARD + max(0, 1000 * (0.99 ** (lap_time // 100)))  # Exponential decay function for reward
-                print(f"Lap completed in {lap_time / 1000:.2f} seconds. Reward: {reward}")
+                print(f"Agent: {self.agent} Lap completed in {lap_time / 1000:.2f} seconds. Reward: {reward}")
                 self.start_new_lap()  # Start a new lap and track the time
                 return reward
 
@@ -374,187 +375,171 @@ def main():
     # Define the different maps and agents
     # maps = ["lake_circle.png", "lake.png", "lake_duck.png"]  # Add your map file names here
     # agents = ["td3.png", "ddpg.png", "sac.png"]  # Add your agent names here
-    maps = ["lake.png"]  # Add your map file names here
-    agents_paths = ["td3.png"]  # Add your agent names here
+    maps = ["lake_circle.png"]  # Add your map file names here
+    agents_paths = ["td3.png","ddpg.png"]  # Add your agent names here
+
     num_iterations = 1  # Number of training iterations
-    base_output_folder = "metrics"
+    base_output_folder = "training_metrics"
     # Initialize the CSV file
     if not os.path.exists(base_output_folder):
         os.makedirs(base_output_folder)
    
     clock = pygame.time.Clock()
-    num_agents = 2
+    num_agents = len(agents_paths)
     state_dim = 5
     action_dim = 2  
     max_action = 1
 
     for map_path in maps:
-        for agent_path in agents_paths:
-            agent_name = agent_path.removesuffix(".png")
-            map_name = map_path.removesuffix(".png")
-            TRACK = pygame.image.load(os.path.join("Assets", map_path))
-            print(f"\nStarting training for map: {map_name} and agent: {agent_name}\n")
-            for iteration in range(1, num_iterations + 1):
-                iteration_folder = os.path.join(base_output_folder, f"iteration_{iteration}")
-                if not os.path.exists(iteration_folder):
-                    os.makedirs(iteration_folder)
-                if agent_name == "ddpg":
-                    agents = [DDPGAgent(state_dim, action_dim, max_action) for _ in range(num_agents)]
-                elif agent_name == "td3":
-                    agents = [TD3Agent(state_dim, action_dim, max_action) for _ in range(num_agents)]
-                    agents[0].load(f"{agent_name}_{map_name}_fastest_time_state",folder = iteration_folder)
-                    agents[1].load(f"{agent_name}_{map_name}_final_state",folder = iteration_folder)
+        agents = []
+        # agent_name = agent_path.removesuffix(".png")
+        map_name = map_path.removesuffix(".png")
+        TRACK = pygame.image.load(os.path.join("Assets", map_path))
+        for iteration in range(1, num_iterations + 1):
+            iteration_folder = os.path.join(base_output_folder, f"iteration_{iteration}")
+            if not os.path.exists(iteration_folder):
+                os.makedirs(iteration_folder)
+
+            # Create agents based on the specified types
+            for i, agent_type in enumerate(agents_paths):
+                agent_type = agent_type.removesuffix(".png")
+                if agent_type == "ddpg":
+                    agent = DDPGAgent(state_dim, action_dim, max_action)
+                    agent.load(f"{agent_type}_{map_name}_fastest_time_state",folder = iteration_folder)
+                elif agent_type == "td3":
+                    agent = TD3Agent(state_dim, action_dim, max_action)
+                    agent.load(f"{agent_type}_{map_name}_fastest_time_state", folder=iteration_folder)
+                elif agent_type == "sac":
+                    agent = SACAgent(state_dim, action_dim, max_action)
+                    agent.load(f"{agent_type}_{map_name}_fastest_time_state", folder=iteration_folder)
                 else:
-                    agents = [SACAgent(state_dim, action_dim, max_action) for _ in range(num_agents)]
+                    raise ValueError(f"Unknown agent type: {agent_type}")
+                agents.append(agent)
+            if map_path == "lake_circle.png":
+                coins = None
+            elif map_path == "lake.png":
+                coins = pygame.sprite.Group(
+                    Coin(980, 250),
+                    Coin(600, 130),
+                    Coin(800, 850),
+                    Coin(230, 400)
+                )
+            else:
+                coins = pygame.sprite.Group(
+                    Coin(980, 250),
+                    Coin(600, 130),
+                    Coin(800, 850),
+                    Coin(230, 400)
+                )
+            total_episodes = 5
+            max_timesteps = 1500
+            position_log = []
+            rewards_per_duck = [[] for _ in range(num_agents)]  # Track rewards separately for each duck
+            lap_times_per_duck = [[] for _ in range(num_agents)]  # Track lap times separately for each duck
+            fastest_time = [float('inf')] * num_agents
+            frame_count = 0
+            pygame.font.init()
 
-                if map_path == "lake_circle.png":
-                    coins = None
-                elif map_path == "lake.png":
-                    coins = pygame.sprite.Group(
-                        Coin(980, 250),
-                        Coin(600, 130),
-                        Coin(800, 850),
-                        Coin(230, 400)
-                    )
-                else:
-                    coins = pygame.sprite.Group(
-                        Coin(980, 250),
-                        Coin(600, 130),
-                        Coin(800, 850),
-                        Coin(230, 400)
-                    )
-                total_episodes = 100
-                max_timesteps = 1500
-                position_log = []
-                rewards_per_episode = []
-                lap_times_per_episode = []
-                actor_losses = []
-                critic_losses = []
-                q_values = []
-                fastest_time = 10000
-                frame_count = 0
-                pygame.font.init()
-
-                for episode in range(total_episodes):
-                    ducks = [DuckRacer(map_name=map_name, duck=agent_path) for _ in range(num_agents)]
-                    duck_groups = pygame.sprite.Group(*ducks)
-                    total_rewards = [0] * num_agents
-                    episode_timesteps = 0
-                    lap_times = []  # Store lap times for this episode
-                    paused = False
-                    episode_actor_loss = 0
-                    episode_critic_loss = 0
-                    episode_q_value = 0
-                    episode_updates = 0
+            for episode in range(total_episodes):
+                ducks = [DuckRacer(map_name=map_name, duck=agent_path) for agent_path in agents_paths[:num_agents]]
+                duck_groups = pygame.sprite.Group(*ducks)
+                total_rewards = [0] * num_agents
+                episode_timesteps = 0
+                lap_times = [[] for _ in range(len(ducks))]  # Store lap times for this episode
+                paused = False
+                episode_updates = 0
 
 
-                    while not paused:
-                        for event in pygame.event.get():
-                            if event.type == pygame.QUIT:
-                                paused = True
-                            if event.type >= pygame.USEREVENT:
-                                coin_index = event.type - pygame.USEREVENT
-                                if coins != None:
-                                    if 0 <= coin_index < len(coins.sprites()):
-                                        coins.sprites()[coin_index].reset_color()
+                while not paused:
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            paused = True
+                        if event.type >= pygame.USEREVENT:
+                            coin_index = event.type - pygame.USEREVENT
+                            if coins != None:
+                                if 0 <= coin_index < len(coins.sprites()):
+                                    coins.sprites()[coin_index].reset_color()
 
-                        SCREEN.blit(TRACK, (0, 0))
+                    SCREEN.blit(TRACK, (0, 0))
+                    if coins:
+                        coins.draw(SCREEN)
+                    # display_episode_number(SCREEN, episode + 1, font)  # Display the current episode number
+                    for i, checkpoint in enumerate(ducks[0].checkpoints):
+                        pygame.draw.rect(SCREEN, (80, 90, 145), checkpoint)
+
+                    for i, duck in enumerate(ducks):
+                        if not duck.alive:
+                            continue
+                        reward = 0
+                        state = duck.data()
+                        state = np.array(state, dtype=np.float32)
+
+                        if duck.agent == "td3":
+                            exploration_noise = 0.393
+                            action = agents[i].select_action(state, exploration_noise)
+                        else:
+                            action = agents[i].select_action(state)
+
+                        duck.target_direction = 1 if action[0] > 0.5 else -1 if action[0] < -0.5 else 0
+                        duck.target_velocity = max(2, min(10, action[1]*7)) #minimum velocity is 2, max is 10
+
+                        reward = cal_checkpoint_reward(duck)
+
+                        duck.update()
+                        reward += duck.update_lap_progress()
                         if coins:
-                            coins.draw(SCREEN)
-                        # display_episode_number(SCREEN, episode + 1, font)  # Display the current episode number
-                        for i, checkpoint in enumerate(ducks[0].checkpoints):
-                            pygame.draw.rect(SCREEN, (80, 90, 145), checkpoint)
+                            reward += duck.check_coin_collision(coins)
+                        if not duck.alive:
+                            reward = -1000
+                            done = True
+                            next_state = np.zeros_like(state, dtype=np.float32)
+                        else:
+                            # reward += 0.0001
+                            total_rewards[i] += reward
+                            next_state = duck.data()
+                            next_state = np.array(next_state, dtype=np.float32)
+                            done = episode_timesteps >= max_timesteps
+                        agents[i].add_to_replay(state, action, reward, next_state, done)
+                        episode_updates += 1
+                        # Log the position for heatmap
+                        position_log.append(duck.rect.center)
 
-                        for i, duck in enumerate(ducks):
-                            if not duck.alive:
-                                continue
-                            reward = 0
-                            state = duck.data()
-                            state = np.array(state, dtype=np.float32)
+                    episode_timesteps += 1
 
-                            if agent_name == "td3":
-                                exploration_noise = 0.393
-                                action = agents[i].select_action(state, exploration_noise)
-                            else:
-                                action = agents[i].select_action(state)
-
-                            duck.target_direction = 1 if action[0] > 0.5 else -1 if action[0] < -0.5 else 0
-                            duck.target_velocity = max(2, min(10, action[1]*7)) #minimum velocity is 2, max is 10
-
-                            reward = cal_checkpoint_reward(duck)
-
-                            duck.update()
-                            reward += duck.update_lap_progress()
-                            if coins:
-                                reward += duck.check_coin_collision(coins)
-                            if not duck.alive:
-                                reward = -1000
-                                done = True
-                                next_state = np.zeros_like(state, dtype=np.float32)
-                            else:
-                                # reward += 0.0001
-                                total_rewards[i] += reward
-                                next_state = duck.data()
-                                next_state = np.array(next_state, dtype=np.float32)
-                                done = episode_timesteps >= max_timesteps
-                            agents[i].add_to_replay(state, action, reward, next_state, done)
-                            episode_updates += 1
-                            # Log the position for heatmap
-                            position_log.append(duck.rect.center)
-
-                        episode_timesteps += 1
-
-                        if all(not duck.alive for duck in ducks) or episode_timesteps >= max_timesteps:
-                            print(f"\n----------------Episode {episode + 1}/{total_episodes} ended.----------------")
-                            for j, reward in enumerate(total_rewards):
-                                print(f"Duck {j + 1}: Total reward = {reward}")
-                            break
-                        
-                        duck_groups.draw(SCREEN)
-                        pygame.display.update()
-
-                    rewards_per_episode.append(sum(total_rewards))
-                    for i in range(len(ducks)):
-                        duck_times = ducks[i].get_lap_times()
-                        for j in duck_times:
-                            if j < fastest_time:
-                                fastest_time = j
-                                agents[0].save(f"{agent_name}_{map_name}_fastest_time_state:{fastest_time}",folder = iteration_folder)
-                        if len(duck_times) > 0:
-                            lap_times.extend(duck_times)
-                    if lap_times:
-                        lap_times_per_episode.append(sum(lap_times) / len(lap_times))
+                    if all(not duck.alive for duck in ducks) or episode_timesteps >= max_timesteps:
+                        print(f"\n----------------Episode {episode + 1}/{total_episodes} ended.----------------")
+                        for j, reward in enumerate(total_rewards):
+                            print(f"Duck {duck.agent}: Total reward = {reward}")
+                        break
+                    
+                    duck_groups.draw(SCREEN)
+                    pygame.display.update()
+# Store episode-level metrics
+                for i in range(num_agents):
+                    rewards_per_duck[i].append(total_rewards[i])
+                    duck_times = ducks[i].get_lap_times()
+                    if duck_times:
+                        lap_times[i].extend(duck_times)
+                        fastest_time[i] = min(fastest_time[i], min(lap_times[i]))
+                        lap_times_per_duck[i].append(sum(lap_times[i]) / len(lap_times[i]))
                     else:
-                        lap_times_per_episode.append(None)
-                    actor_losses.append(episode_actor_loss / max(episode_updates, 1))
-                    critic_losses.append(episode_critic_loss / max(episode_updates, 1))
-                    q_values.append(episode_q_value / max(episode_updates, 1))
+                        lap_times_per_duck[i].append(None)
+        
+            avg_rewards = [sum(rewards) / total_episodes for rewards in rewards_per_duck]
+            avg_lap_times = [
+                sum(times) / len(times) if times else None for times in lap_times_per_duck
+            ]
+            for i, duck in enumerate(agents_paths):
+                print(f"Agent {duck}: Average reward = {avg_rewards[i]}, Average lap time = {avg_lap_times[i]}, Fastest time = {fastest_time[i]}")
+                # print(f"Iteration {iteration}: average reward = {avg_reward}")
+                # print(f"Iteration {iteration}: average lap time = {avg_lap_time}")
+                # print(f"Iteration {iteration}: Fastest time = {fastest_time}")
+                # print(f"Iteration {iteration}: average reward = {avg_reward}")
+                # print(f"Iteration {iteration}: Fastest time = {fastest_time}")
 
-                agents[0].save(f"{agent_name}_{map_name}_final_state",folder = iteration_folder)
-                if len(lap_times_per_episode) > 0:
-                    total = 0
-                    count = 0
-                    for i in range(len(lap_times_per_episode)):
-                        if lap_times_per_episode[i] is not None:
-                            total += lap_times_per_episode[i]
-                            count += 1
-                    avg_reward = sum(rewards_per_episode) / total_episodes
-                    if count == 0:
-                        avg_lap_time = None
-                    else:
-                        avg_lap_time = total / count
-                    # print(f"Iteration {iteration}: average reward = {avg_reward}")
-                    # print(f"Iteration {iteration}: average lap time = {avg_lap_time}")
-                    # print(f"Iteration {iteration}: Fastest time = {fastest_time}")
-                else:
-                    avg_reward = sum(rewards_per_episode) / total_episodes
-                    avg_lap_time = None
-                    # print(f"Iteration {iteration}: average reward = {avg_reward}")
-                    # print(f"Iteration {iteration}: Fastest time = {fastest_time}")
-
-                # create_heatmap(position_log, SCREEN_WIDTH, SCREEN_HEIGHT, folder=iteration_folder, track = os.path.join("Assets", map_path), agent_name=agent_name, map=map_name)
-                # plot_graphs(total_episodes, rewards_per_episode, lap_times_per_episode, actor_losses, critic_losses, q_values, folder=iteration_folder, agent_name=agent_name, map=map_name)
-                # create_training_gif(folder=frames_folder, output_filename="training_process.gif", fps=60, folder_save=iteration_folder, agent_name=agent_name, map=map_name)
+            # create_heatmap(position_log, SCREEN_WIDTH, SCREEN_HEIGHT, folder=iteration_folder, track = os.path.join("Assets", map_path), agent_name=agent_name, map=map_name)
+            # plot_graphs(total_episodes, rewards_per_episode, lap_times_per_episode, actor_losses, critic_losses, q_values, folder=iteration_folder, agent_name=agent_name, map=map_name)
+            # create_training_gif(folder=frames_folder, output_filename="training_process.gif", fps=60, folder_save=iteration_folder, agent_name=agent_name, map=map_name)
     pygame.quit()
 
 

@@ -438,8 +438,6 @@ def main():
                 q_values = []
                 fastest_time = 10000
                 frame_count = 0
-                pygame.font.init()
-                font = pygame.font.Font(None, 36)
                 frames_folder = os.path.join(iteration_folder, "frames")
                 if not os.path.exists(frames_folder):
                     os.makedirs(frames_folder)
@@ -458,8 +456,6 @@ def main():
                     episode_critic_loss = 0
                     episode_q_value = 0
                     episode_updates = 0
-
-
                     while not paused:
                         for event in pygame.event.get():
                             if event.type == pygame.QUIT:

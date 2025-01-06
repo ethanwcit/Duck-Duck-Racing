@@ -1,5 +1,5 @@
 /frames
 /metrics/
+/training_metrics/
 /saved_agents
-__pycache__
-
+__pycache__/

@@ -396,8 +396,9 @@ def main():
                 rewards_per_episode = []
                 lap_times_per_episode = []
                 fastest_time = 10000
-
+                frame_count = 0
                 pygame.font.init()
+                font = pygame.font.Font(None, 36)
 
                 frames_folder = os.path.join(iteration_folder, "frames")
                 if not os.path.exists(frames_folder):
@@ -476,6 +477,10 @@ def main():
                         
                         duck_groups.draw(SCREEN)
                         pygame.display.update()
+                        # Save the current frame
+                        if (episode_timesteps -1) % 50==0:
+                            # save_frame(SCREEN, frame_count, folder = os.path.join(iteration_folder, "frames"))
+                            frame_count += 1
                         clock.tick(FPS)
                     rewards_per_episode.append(sum(total_rewards))
                     for i in range(len(ducks)):
@@ -518,6 +523,7 @@ def main():
                     writer.writerow(["user", map_name, iteration, avg_reward, avg_lap_time, fastest_time])
                 create_heatmap(position_log, SCREEN_WIDTH, SCREEN_HEIGHT, folder=iteration_folder, track = os.path.join("Assets", map_path), agent_name=agent_name, map=map_name)
                 plot_graphs(total_episodes, rewards_per_episode, lap_times_per_episode, folder=iteration_folder, agent_name=agent_name, map=map_name)
+                # create_training_gif(folder=frames_folder, output_filename="training_process.gif", fps=60, folder_save=iteration_folder, agent_name=agent_name, map=map_name)
     pygame.quit()
 
 

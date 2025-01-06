@@ -77,6 +77,7 @@ class ReplayBuffer:
         )
 class SACAgent:
     def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=3e-3,alpha = 0.15):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.actor = Actor(state_dim, action_dim, max_action).cuda()
         self.actor_target = Actor(state_dim, action_dim, max_action).cuda()
         self.actor_target.load_state_dict(self.actor.state_dict())
@@ -220,3 +221,20 @@ class SACAgent:
             action, _ = self.actor.sample(state_tensor) 
 
         return action.cpu().numpy().flatten()
+    
+    def load(self, filename, folder="saved_agents"):
+        filepath = os.path.join(folder, filename)
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"No saved agent state found at {filepath}.")
+        
+        checkpoint = torch.load(filepath, map_location=self.device)
+        
+        self.actor.load_state_dict(checkpoint['actor_state_dict'])
+        self.critic1.load_state_dict(checkpoint['critic1_state_dict'])
+        self.critic2.load_state_dict(checkpoint['critic2_state_dict'])
+        self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+        self.critic1_optimizer.load_state_dict(checkpoint['critic_optimizer1_state_dict'])
+        self.critic2_optimizer.load_state_dict(checkpoint['critic_optimizer2_state_dict'])
+        
+        self.actor_target.load_state_dict(checkpoint['actor_state_dict'])        
+        print(f"Agent's state loaded from {filename}.")

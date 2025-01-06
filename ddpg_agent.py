@@ -67,6 +67,7 @@ class ReplayBuffer:
 # DDPG Agent
 class DDPGAgent:
     def __init__(self, state_dim, action_dim, max_action, gamma=0.99, tau=0.005, lr=1e-3):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.actor = Actor(state_dim, action_dim, max_action).to(device)
         self.actor_target = Actor(state_dim, action_dim, max_action).to(device)
         self.actor_target.load_state_dict(self.actor.state_dict())
@@ -134,3 +135,18 @@ class DDPGAgent:
             'critic_optimizer_state_dict': self.critic_optimizer.state_dict(),
         }, os.path.join(folder, filename))
         print(f"Agent's state saved to {filename}.")
+    def load(self, filename, folder="saved_agents"):
+        filepath = os.path.join(folder, filename)
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"No saved agent state found at {filepath}.")
+        
+        checkpoint = torch.load(filepath, map_location=self.device)
+        
+        self.actor.load_state_dict(checkpoint['actor_state_dict'])
+        self.critic.load_state_dict(checkpoint['critic_state_dict'])
+        self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+        self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
+        
+        self.actor_target.load_state_dict(checkpoint['actor_state_dict'])
+        
+        print(f"Agent's state loaded from {filename}.")
