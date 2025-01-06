@@ -6,7 +6,6 @@ from ddpg_agent import DDPGAgent
 from td3_agent import TD3Agent
 from sac_agent import SACAgent
 import matplotlib.pyplot as plt
-from moviepy import ImageSequenceClip
 import matplotlib.image as mpimg
 from scipy.ndimage import gaussian_filter
 import shutil
@@ -79,10 +78,6 @@ class DuckRacer(pygame.sprite.Sprite):
         self.lap_times = []
 
     def update_lap_progress(self):
-        """
-        Check if the car has reached the next checkpoint. If all checkpoints are passed
-        sequentially, the lap is completed. A higher reward is given for faster lap times.
-        """
         next_checkpoint = self.checkpoints[self.next_checkpoint_i]
         checkpoint_center = (
             next_checkpoint[0] + next_checkpoint[2] / 2,  # Center X
@@ -174,61 +169,54 @@ class DuckRacer(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(center=self.rect.center)
 
     def collision(self):
+        # Define the length of the collision detection points from the center of the object
         length = 40
+        # Calculate the right and left collision point based on the angle and distance
         collision_point_right = [int(self.rect.center[0] + math.cos(math.radians(self.angle + 18)) * length),
-                                 int(self.rect.center[1] - math.sin(math.radians(self.angle + 18)) * length)]
+                                int(self.rect.center[1] - math.sin(math.radians(self.angle + 18)) * length)]
         collision_point_left = [int(self.rect.center[0] + math.cos(math.radians(self.angle - 18)) * length),
                                 int(self.rect.center[1] - math.sin(math.radians(self.angle - 18)) * length)]
+        # Check if either collision point hits a specific color
+        if SCREEN.get_at(collision_point_right) == pygame.Color(207, 230, 186, 255) \
+                or SCREEN.get_at(collision_point_left) == pygame.Color(207, 230, 186, 255):
+            self.alive = False  # Mark the object as no longer alive if it collides
 
-        if SCREEN.get_at(collision_point_right) == pygame.Color(207,230,186,255) \
-                or SCREEN.get_at(collision_point_left) == pygame.Color(207,230,186,255):
-            self.alive = False
-
+        # Draw the collision points 
         pygame.draw.circle(SCREEN, (0, 255, 255, 0), collision_point_right, 4)
         pygame.draw.circle(SCREEN, (0, 255, 255, 0), collision_point_left, 4)
 
-    def rotate_drive(self):
-        self.direction = (1 - self.filter_alpha) * self.direction + self.filter_alpha * self.target_direction
-        self.current_velocity += (self.target_velocity - self.current_velocity) * self.smoothing_factor
-        self.vel_vector = self.vel_vector.normalize() * self.current_velocity  # Apply smoothed velocity
-        
-        if abs(self.direction - self.target_direction) < 0.05:
-            self.direction = self.target_direction
-
-        if self.direction == 1:
-            self.angle -= self.rotation_vel
-            self.vel_vector.rotate_ip(self.rotation_vel)
-        if self.direction == -1:
-            self.angle += self.rotation_vel
-            self.vel_vector.rotate_ip(-self.rotation_vel)
-
-        self.image = pygame.transform.rotozoom(self.original_image, self.angle, 0.1)
-        self.rect.center += self.vel_vector
-        self.rect = self.image.get_rect(center=self.rect.center)
-
     def radar(self, radar_angle):
+        # Initialize radar length and starting position
         length = 0
         x = int(self.rect.center[0])
         y = int(self.rect.center[1])
 
-        while not SCREEN.get_at((x, y)) == pygame.Color(207,230,186,255) and length < 200:
+        # Extend the radar line until it hits a specific color or reaches the maximum length
+        while not SCREEN.get_at((x, y)) == pygame.Color(207, 230, 186, 255) and length < 200:
             length += 1
             x = int(self.rect.center[0] + math.cos(math.radians(self.angle + radar_angle)) * length)
             y = int(self.rect.center[1] - math.sin(math.radians(self.angle + radar_angle)) * length)
 
+        # Draw the radar line and end
         pygame.draw.line(SCREEN, (255, 255, 255, 255), self.rect.center, (x, y), 1)
         pygame.draw.circle(SCREEN, (0, 255, 0, 0), (x, y), 3)
 
+        # Calculate the distance from the center to the radar endpoint
         dist = int(math.sqrt(math.pow(self.rect.center[0] - x, 2)
-                             + math.pow(self.rect.center[1] - y, 2)))
+                            + math.pow(self.rect.center[1] - y, 2)))
 
+        # Append the radar angle and distance to the radars list
         self.radars.append([radar_angle, dist])
 
     def data(self):
+        # Initialize the radar input with default values
         input = [0, 0, 0, 0, 0]
+        # Populate the input array with radar distances
         for i, radar in enumerate(self.radars):
             input[i] = int(radar[1])
+        # Normalize the radar data to the range [0, 1]
         normalized_data = [(x - self.radar_min) / (self.radar_max - self.radar_min) for x in input]
+        # Return the normalized radar data as input
         return normalized_data
     
 def plot_graphs(total_episodes, rewards_per_episode, lap_times_per_episode, actor_losses, critic_losses, q_values, folder = "metrics",agent_name = "td3", map = "lake"):
@@ -303,6 +291,7 @@ def cal_checkpoint_reward(duck):
     distance_to_checkpoint = checkpoint_vector.length()  # The distance to the checkpoint
     # Dot product to determine if we are moving towards or away from the checkpoint
     dot_product = duck.vel_vector.dot(checkpoint_vector.normalize())
+
     # Reward based on both distance and movement direction
     const =  0.5  # Constant for scaling
     epsilon = 0.001  # Small epsilon to avoid division by zero
@@ -353,31 +342,13 @@ def create_heatmap(save_pos, screen_w, screen_h, track ,output_file="heatmap.png
     # np.save("heatmap_array.npy", heatmap_arr)
     # print("Heatmap array saved as heatmap_array.npy")
 
-def save_frame(surface, frame_number, folder="frames"):
-    pygame.image.save(surface, os.path.join(folder, f"frame_{frame_number:04d}.png"))
-
-def create_training_gif(folder="frames", output_filename="training_process.gif", fps=120, folder_save = "metrics", agent_name = "td3", map = "lake"):
-    path = os.path.join(os.path.join(folder_save,agent_name), map)
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-    frames = sorted([os.path.join(folder, f) for f in os.listdir(folder) if f.endswith(".png")])
-    if frames:
-        clip = ImageSequenceClip(frames, fps=fps)
-        clip.write_gif(os.path.join(path,f"{agent_name}_{map}_{output_filename}"))
-        print(f"GIF saved as {output_filename}") 
-        shutil.rmtree(folder)  # Clean up the frames folder   
-
-def display_episode_number(screen, episode, font):
-    text = font.render(f"Episode: {episode}", True, (255, 255, 255))
-    screen.blit(text, (10, 10))
 
 def main():
     # Define the different maps and agents
-    # maps = ["lake_circle.png", "lake.png", "lake_duck.png"]  # Add your map file names here
-    # agents = ["td3.png", "ddpg.png", "sac.png"]  # Add your agent names here
-    maps = ["lake_duck.png"]  # Add your map file names here
-    agents_paths = ["td3.png"]  # Add your agent names here
+    # maps = ["lake_circle.png", "lake.png", "lake_duck.png"] 
+    # agents = ["td3.png", "ddpg.png", "sac.png"]  
+    maps = ["lake_duck.png"]  # Map names here
+    agents_paths = ["td3.png"]  # Agent names here
     num_iterations = 1  # Number of training iterations
     base_output_folder = "metrics"
     metrics_file = os.path.join(base_output_folder, "iteration_metrics.csv")
@@ -411,7 +382,7 @@ def main():
                     agents = [TD3Agent(state_dim, action_dim, max_action) for _ in range(num_agents)]
                 else:
                     agents = [SACAgent(state_dim, action_dim, max_action) for _ in range(num_agents)]
-
+                # Assigns coins based on map
                 if map_path == "lake_circle.png":
                     coins = None
                 elif map_path == "lake.png":
@@ -438,7 +409,7 @@ def main():
                 q_values = []
                 fastest_time = 10000
                 frame_count = 0
-                frames_folder = os.path.join(iteration_folder, "frames")
+                frames_folder = os.path.join(iteration_folder, "frames") #folder to save frames in
                 if not os.path.exists(frames_folder):
                     os.makedirs(frames_folder)
                 else:
@@ -482,13 +453,13 @@ def main():
 
                             if agent_name == "td3":
                                 exploration_noise = 0.393
-                                # if episode > 20:
-                                #     exploration_noise = 0.09
+                                if episode > 20:
+                                    exploration_noise = 0.09
                                 action = agents[i].select_action(state, exploration_noise)
                             else:
                                 action = agents[i].select_action(state)
 
-                            duck.target_direction = 1 if action[0] > 0.5 else -1 if action[0] < -0.5 else 0
+                            duck.target_direction = 1 if action[0] > 0.5 else -1 if action[0] < -0.5 else 0 # 1: right, -1: left, 0: straight
                             duck.target_velocity = max(2, min(10, action[1]*10)) #minimum velocity is 2, max is 10
 
                             reward = cal_checkpoint_reward(duck)
@@ -534,12 +505,9 @@ def main():
                         
                         duck_groups.draw(SCREEN)
                         pygame.display.update()
-                        # Save the current frame
-                        # if (episode_timesteps -1) % 25==0:
-                        #     # save_frame(SCREEN, frame_count, folder = os.path.join(iteration_folder, "frames"))
-                        #     frame_count += 1
                         clock.tick(FPS)
                     rewards_per_episode.append(sum(total_rewards))
+                    # Save metrics, including calculating the fastest lap time
                     for i in range(len(ducks)):
                         duck_times = ducks[i].get_lap_times()
                         for j in duck_times:
@@ -584,7 +552,6 @@ def main():
                     writer.writerow([agent_name, map_name, iteration, avg_reward, avg_lap_time, fastest_time])
                 create_heatmap(position_log, SCREEN_WIDTH, SCREEN_HEIGHT, folder=iteration_folder, track = os.path.join("Assets", map_path), agent_name=agent_name, map=map_name)
                 plot_graphs(total_episodes, rewards_per_episode, lap_times_per_episode, actor_losses, critic_losses, q_values, folder=iteration_folder, agent_name=agent_name, map=map_name)
-                # create_training_gif(folder=frames_folder, output_filename="training_process.gif", fps=60, folder_save=iteration_folder, agent_name=agent_name, map=map_name)
     pygame.quit()
 
 
